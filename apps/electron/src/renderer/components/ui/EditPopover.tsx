@@ -317,6 +317,9 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
     displayLabelKey: 'editPopover.label.addSource',
     exampleKey: 'editPopover.example.addSource',
     overridePlaceholderKey: 'editPopover.placeholder.addSource',
+    model: 'fast',
+    systemPromptPreset: 'mini',
+    inlineExecution: true,
   }),
 
   // Filter-specific add-source contexts: user is viewing a filtered list and wants to add that type
@@ -338,6 +341,9 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
     displayLabelKey: 'editPopover.label.addApi',
     exampleKey: 'editPopover.example.addSourceApi',
     overridePlaceholderKey: 'editPopover.placeholder.addSourceApi',
+    model: 'fast',
+    systemPromptPreset: 'mini',
+    inlineExecution: true,
   }),
 
   'add-source-mcp': (location) => ({
@@ -358,6 +364,9 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
     displayLabelKey: 'editPopover.label.addMcpServer',
     exampleKey: 'editPopover.example.addSourceMcp',
     overridePlaceholderKey: 'editPopover.placeholder.addSourceMcp',
+    model: 'fast',
+    systemPromptPreset: 'mini',
+    inlineExecution: true,
   }),
 
   'add-source-local': (location) => ({
@@ -379,6 +388,9 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
     displayLabelKey: 'editPopover.label.addLocalFolder',
     exampleKey: 'editPopover.example.addSourceLocal',
     overridePlaceholderKey: 'editPopover.placeholder.addSourceLocal',
+    model: 'fast',
+    systemPromptPreset: 'mini',
+    inlineExecution: true,
   }),
 
   'add-skill': (location) => ({
@@ -398,6 +410,9 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
     displayLabelKey: 'editPopover.label.addSkill',
     exampleKey: 'editPopover.example.addSkill',
     overridePlaceholderKey: 'editPopover.placeholder.addSkill',
+    model: 'fast',
+    systemPromptPreset: 'mini',
+    inlineExecution: true,
   }),
 
   // Status configuration context
