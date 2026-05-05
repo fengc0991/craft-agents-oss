@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
-import { readdir, stat } from 'node:fs/promises'
-import { join, relative } from 'path'
+import { lstat, mkdir, readdir, rename, rm, stat } from 'node:fs/promises'
+import { dirname, isAbsolute, join, relative, resolve } from 'path'
 import { homedir } from 'os'
 import { RPC_CHANNELS, type SessionFile } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId, addWorkspace, setActiveWorkspace, updateWorkspaceRemoteServer } from '@craft-agent/shared/config'
@@ -20,6 +20,9 @@ export const CORE_HANDLED_CHANNELS = [
   RPC_CHANNELS.workspace.READ_IMAGE,
   RPC_CHANNELS.workspace.WRITE_IMAGE,
   RPC_CHANNELS.workspace.GET_FILES,
+  RPC_CHANNELS.workspace.CREATE_FOLDER,
+  RPC_CHANNELS.workspace.RENAME_PATH,
+  RPC_CHANNELS.workspace.DELETE_PATH,
   RPC_CHANNELS.workspace.WATCH_FILES,
   RPC_CHANNELS.workspace.UNWATCH_FILES,
   RPC_CHANNELS.theme.GET_APP,
@@ -48,7 +51,12 @@ const clientWorkspaceFileWatches = new Map<string, ClientWorkspaceWatchState>()
 
 const WORKSPACE_SYSTEM_ROOT_NAMES = new Set([
   'automations.json',
+  'automations.history.jsonl',
+  'automations-history.jsonl',
+  'automations.retry-queue.jsonl',
+  'automations-retry-queue.jsonl',
   'config.json',
+  'events.jsonl',
   'labels.json',
   'permissions.json',
   'theme.json',
@@ -76,9 +84,17 @@ function isWorkspaceSystemRootIcon(name: string): boolean {
   return /^icon\.(svg|png|jpe?g|webp|gif|ico)$/i.test(name)
 }
 
+function isWorkspaceSystemRootArtifact(name: string): boolean {
+  const lower = name.toLowerCase()
+  return lower.endsWith('.tmp') || /^(events|automations[.-]history|automations[.-]retry-queue)\.jsonl$/.test(lower)
+}
+
 function shouldSkipWorkspaceEntry(name: string, relativeSegments: string[], isDirectory: boolean): boolean {
   if (!name || name.startsWith('.')) return true
-  if (relativeSegments.length === 0 && (WORKSPACE_SYSTEM_ROOT_NAMES.has(name) || isWorkspaceSystemRootIcon(name))) {
+  if (
+    relativeSegments.length === 0 &&
+    (WORKSPACE_SYSTEM_ROOT_NAMES.has(name) || isWorkspaceSystemRootIcon(name) || isWorkspaceSystemRootArtifact(name))
+  ) {
     return true
   }
   if (isDirectory && WORKSPACE_IGNORED_DIRECTORY_NAMES.has(name)) return true
@@ -94,8 +110,78 @@ function shouldIgnoreWorkspaceWatchPath(filename: string): boolean {
   return (
     segments.some(segment => segment.startsWith('.') || WORKSPACE_IGNORED_DIRECTORY_NAMES.has(segment)) ||
     WORKSPACE_SYSTEM_ROOT_NAMES.has(rootName) ||
-    isWorkspaceSystemRootIcon(rootName)
+    isWorkspaceSystemRootIcon(rootName) ||
+    isWorkspaceSystemRootArtifact(rootName)
   )
+}
+
+function isPathWithin(rootPath: string, targetPath: string): boolean {
+  const rel = relative(rootPath, targetPath)
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+function getRelativeSegments(rootPath: string, targetPath: string): string[] {
+  const rel = relative(rootPath, targetPath)
+  return rel.split(/[\\/]+/).filter(Boolean)
+}
+
+function validateWorkspaceFolderName(name: string): string {
+  const trimmed = name.trim()
+  if (!trimmed) throw new Error('Folder name is required')
+  if (trimmed === '.' || trimmed === '..') throw new Error('Invalid folder name')
+  if (trimmed.includes('/') || trimmed.includes('\\')) throw new Error('Folder name cannot contain path separators')
+  if (/[\x00-\x1f<>:"|?*]/.test(trimmed)) throw new Error('Folder name contains invalid characters')
+  if (trimmed.startsWith('.') || trimmed.endsWith('.') || trimmed.endsWith(' ')) throw new Error('Invalid folder name')
+  if (WORKSPACE_IGNORED_DIRECTORY_NAMES.has(trimmed)) throw new Error('Folder name is reserved')
+  return trimmed
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
+  }
+}
+
+async function resolveUserVisibleWorkspacePath(
+  rootPath: string,
+  targetPath: string,
+  options: { allowRoot?: boolean; requireDirectory?: boolean } = {},
+): Promise<string> {
+  const root = resolve(rootPath)
+  const target = resolve(targetPath)
+
+  if (!isPathWithin(root, target)) {
+    throw new Error('Path is outside the workspace')
+  }
+
+  const segments = getRelativeSegments(root, target)
+  if (segments.length === 0) {
+    if (!options.allowRoot) {
+      throw new Error('This operation is not supported for the workspace root')
+    }
+  } else {
+    const name = segments[segments.length - 1]!
+    const parentSegments = segments.slice(0, -1)
+    const stats = await lstat(target)
+    if (stats.isSymbolicLink()) throw new Error('Symbolic links are not supported')
+    if (shouldSkipWorkspaceEntry(name, parentSegments, stats.isDirectory())) {
+      throw new Error('Cannot modify system or hidden workspace files')
+    }
+    if (options.requireDirectory && !stats.isDirectory()) {
+      throw new Error('Expected a folder')
+    }
+    return target
+  }
+
+  const rootStats = await lstat(target)
+  if (options.requireDirectory && !rootStats.isDirectory()) {
+    throw new Error('Expected a folder')
+  }
+  return target
 }
 
 async function scanWorkspaceDirectory(
@@ -290,6 +376,79 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
       deps.platform.logger.error('Failed to get workspace files:', error)
       return []
     }
+  })
+
+  server.handle(RPC_CHANNELS.workspace.CREATE_FOLDER, async (_ctx, workspaceId: string, parentPath: string, name: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error('Workspace not found')
+
+    const parent = await resolveUserVisibleWorkspacePath(workspace.rootPath, parentPath, {
+      allowRoot: true,
+      requireDirectory: true,
+    })
+    const folderName = validateWorkspaceFolderName(name)
+    const target = resolve(parent, folderName)
+    const root = resolve(workspace.rootPath)
+
+    if (!isPathWithin(root, target)) {
+      throw new Error('Path is outside the workspace')
+    }
+
+    const segments = getRelativeSegments(root, target)
+    const parentSegments = segments.slice(0, -1)
+    if (shouldSkipWorkspaceEntry(folderName, parentSegments, true)) {
+      throw new Error('Cannot create system or hidden workspace folders')
+    }
+
+    await mkdir(target, { recursive: false })
+    pushTyped(server, RPC_CHANNELS.workspace.FILES_CHANGED, { to: 'workspace', workspaceId }, workspaceId)
+    return target
+  })
+
+  server.handle(RPC_CHANNELS.workspace.RENAME_PATH, async (_ctx, workspaceId: string, path: string, newName: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error('Workspace not found')
+
+    const source = await resolveUserVisibleWorkspacePath(workspace.rootPath, path, {
+      allowRoot: false,
+      requireDirectory: true,
+    })
+    const folderName = validateWorkspaceFolderName(newName)
+    const target = resolve(dirname(source), folderName)
+    const root = resolve(workspace.rootPath)
+
+    if (!isPathWithin(root, target)) {
+      throw new Error('Path is outside the workspace')
+    }
+    if (source === target) {
+      return target
+    }
+    if (await pathExists(target)) {
+      throw new Error('A file or folder with that name already exists')
+    }
+
+    const segments = getRelativeSegments(root, target)
+    const parentSegments = segments.slice(0, -1)
+    if (shouldSkipWorkspaceEntry(folderName, parentSegments, true)) {
+      throw new Error('Cannot rename to a system or hidden workspace folder')
+    }
+
+    await rename(source, target)
+    pushTyped(server, RPC_CHANNELS.workspace.FILES_CHANGED, { to: 'workspace', workspaceId }, workspaceId)
+    return target
+  })
+
+  server.handle(RPC_CHANNELS.workspace.DELETE_PATH, async (_ctx, workspaceId: string, path: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error('Workspace not found')
+
+    const target = await resolveUserVisibleWorkspacePath(workspace.rootPath, path, {
+      allowRoot: false,
+      requireDirectory: true,
+    })
+
+    await rm(target, { recursive: true, force: false })
+    pushTyped(server, RPC_CHANNELS.workspace.FILES_CHANGED, { to: 'workspace', workspaceId }, workspaceId)
   })
 
   server.handle(RPC_CHANNELS.workspace.WATCH_FILES, async (ctx, workspaceId: string) => {

@@ -2258,15 +2258,20 @@ function AppShellContent({
                 {/* Primary Nav: All Sessions (▸ Statuses, Flagged, Archived), Labels | Sources, Skills | Settings */}
                 {/* pb-4 provides clearance so the last item scrolls above the mask-fade-bottom gradient */}
                 <div className="flex-1 overflow-y-auto min-h-0 mask-fade-bottom pb-4">
-                <WorkspaceFilesSection
-                  workspaceId={activeWorkspaceId}
-                  workspaceRootPath={activeWorkspace?.rootPath}
-                  expanded={isExpanded('nav:workspace')}
-                  onToggle={() => toggleExpanded('nav:workspace')}
-                  onOpenFile={contextValue.onOpenFile}
-                  className="mb-1"
-                />
-                <LeftSidebar
+                  {activeWorkspaceId && (
+                    <>
+                      <WorkspaceFilesSection
+                        workspaceId={activeWorkspaceId}
+                        workspaceRootPath={activeWorkspace?.rootPath}
+                        expanded={isExpanded('nav:workspace')}
+                        onToggle={() => toggleExpanded('nav:workspace')}
+                        onOpenFile={contextValue.onOpenFile}
+                        className="mb-1"
+                      />
+                      <div className="mx-4 my-1 h-px bg-foreground/10" aria-hidden="true" />
+                    </>
+                  )}
+                  <LeftSidebar
                   isCollapsed={false}
                   getItemProps={getSidebarItemProps}
                   focusedItemId={focusedSidebarItemId}

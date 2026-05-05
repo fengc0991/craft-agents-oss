@@ -319,6 +319,9 @@ export interface ElectronAPI {
   // Filesystem search (for @ mention file selection)
   searchFiles(basePath: string, query: string): Promise<FileSearchResult[]>
   getWorkspaceFiles(workspaceId: string): Promise<SessionFile[]>
+  createWorkspaceFolder(workspaceId: string, parentPath: string, name: string): Promise<string>
+  renameWorkspacePath(workspaceId: string, path: string, newName: string): Promise<string>
+  deleteWorkspacePath(workspaceId: string, path: string): Promise<void>
   watchWorkspaceFiles(workspaceId: string): Promise<void>
   unwatchWorkspaceFiles(): Promise<void>
   onWorkspaceFilesChanged(callback: (workspaceId: string) => void): () => void

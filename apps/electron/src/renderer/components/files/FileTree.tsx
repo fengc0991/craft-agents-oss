@@ -10,12 +10,26 @@ import * as React from 'react'
 import { memo, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AnimatePresence, motion, type Variants } from 'motion/react'
-import { File, Folder, FolderOpen, FileText, Image, FileCode, ChevronRight, ExternalLink } from 'lucide-react'
+import {
+  File,
+  Folder,
+  FolderOpen,
+  FileText,
+  Image,
+  FileCode,
+  ChevronRight,
+  ExternalLink,
+  FolderPlus,
+  Pencil,
+  Copy,
+  Trash2,
+} from 'lucide-react'
 import {
   ContextMenu,
   ContextMenuTrigger,
   StyledContextMenuContent,
   StyledContextMenuItem,
+  StyledContextMenuSeparator,
 } from '@/components/ui/styled-context-menu'
 import type { SessionFile } from '../../../shared/types'
 import { cn } from '@/lib/utils'
@@ -187,6 +201,10 @@ interface FileTreeItemProps {
   onFileClick: (file: FileTreeEntry) => void
   onFileDoubleClick: (file: FileTreeEntry) => void
   onRevealInFileManager: (path: string) => void
+  onCreateFolder?: (directory: FileTreeEntry) => void
+  onRenameFolder?: (directory: FileTreeEntry) => void
+  onDeleteFolder?: (directory: FileTreeEntry) => void
+  onCopyPath?: (path: string) => void
 }
 
 function FileTreeItem({
@@ -198,6 +216,10 @@ function FileTreeItem({
   onFileClick,
   onFileDoubleClick,
   onRevealInFileManager,
+  onCreateFolder,
+  onRenameFolder,
+  onDeleteFolder,
+  onCopyPath,
 }: FileTreeItemProps) {
   const { t } = useTranslation()
   const isDirectory = file.type === 'directory'
@@ -224,6 +246,8 @@ function FileTreeItem({
     }
   }
 
+  const actionLabel = isDirectory ? (hasChildren ? 'expand' : 'open') : 'preview'
+
   const buttonElement = (
     <button
       onClick={handleClick}
@@ -234,7 +258,7 @@ function FileTreeItem({
         "hover:bg-sidebar-hover transition-colors px-2",
         isSelected && "bg-foreground/[0.07]"
       )}
-      title={`${file.path}\n${file.type === 'file' ? formatFileSize(file.size) : 'Directory'}\n\nClick to ${hasChildren ? 'expand' : 'preview'}`}
+      title={`${file.path}\n${file.type === 'file' ? formatFileSize(file.size) : 'Directory'}\n\nClick to ${actionLabel}`}
     >
       <span className="relative h-3.5 w-3.5 shrink-0 flex items-center justify-center">
         {hasChildren ? (
@@ -278,12 +302,42 @@ function FileTreeItem({
               {t("chat.openFile")}
             </StyledContextMenuItem>
           )}
+          {file.type === 'directory' && onCreateFolder && (
+            <StyledContextMenuItem onSelect={() => onCreateFolder(file)}>
+              <FolderPlus className="h-3.5 w-3.5" />
+              {t("common.newFolder")}
+            </StyledContextMenuItem>
+          )}
+          {file.type === 'directory' && onRenameFolder && (
+            <StyledContextMenuItem onSelect={() => onRenameFolder(file)}>
+              <Pencil className="h-3.5 w-3.5" />
+              {t("common.rename")}
+            </StyledContextMenuItem>
+          )}
+          {onCopyPath && (
+            <StyledContextMenuItem onSelect={() => onCopyPath(file.path)}>
+              <Copy className="h-3.5 w-3.5" />
+              {t("common.copyPath")}
+            </StyledContextMenuItem>
+          )}
           <StyledContextMenuItem
             onSelect={() => onRevealInFileManager(file.path)}
           >
             <FolderOpen className="h-3.5 w-3.5" />
             {t("chat.showInFileManager", { fileManager: fileManagerName })}
           </StyledContextMenuItem>
+          {file.type === 'directory' && onDeleteFolder && (
+            <StyledContextMenuSeparator />
+          )}
+          {file.type === 'directory' && onDeleteFolder && (
+            <StyledContextMenuItem
+              onSelect={() => onDeleteFolder(file)}
+              variant="destructive"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {t("common.deleteFolder")}
+            </StyledContextMenuItem>
+          )}
         </StyledContextMenuContent>
       </ContextMenu>
       {hasChildren && (
@@ -319,6 +373,10 @@ function FileTreeItem({
                         onFileClick={onFileClick}
                         onFileDoubleClick={onFileDoubleClick}
                         onRevealInFileManager={onRevealInFileManager}
+                        onCreateFolder={onCreateFolder}
+                        onRenameFolder={onRenameFolder}
+                        onDeleteFolder={onDeleteFolder}
+                        onCopyPath={onCopyPath}
                       />
                     </motion.div>
                   ))}
@@ -340,6 +398,11 @@ export interface FileTreeProps {
   onFileClick: (file: FileTreeEntry) => void
   onFileDoubleClick: (file: FileTreeEntry) => void
   onRevealInFileManager: (path: string) => void
+  onCreateFolder?: (directory: FileTreeEntry) => void
+  onRenameFolder?: (directory: FileTreeEntry) => void
+  onDeleteFolder?: (directory: FileTreeEntry) => void
+  onCopyPath?: (path: string) => void
+  withRootGuides?: boolean
 }
 
 export function FileTree({
@@ -350,9 +413,20 @@ export function FileTree({
   onFileClick,
   onFileDoubleClick,
   onRevealInFileManager,
+  onCreateFolder,
+  onRenameFolder,
+  onDeleteFolder,
+  onCopyPath,
+  withRootGuides = false,
 }: FileTreeProps) {
   return (
-    <nav className="grid gap-0.5 px-2">
+    <nav className={cn("grid gap-0.5 relative", withRootGuides ? "pl-7 pr-2" : "px-2")}>
+      {withRootGuides && (
+        <div
+          className="absolute left-[21px] top-1 bottom-1 w-px bg-foreground/10"
+          aria-hidden="true"
+        />
+      )}
       {files.map((file) => (
         <FileTreeItem
           key={file.path}
@@ -364,6 +438,10 @@ export function FileTree({
           onFileClick={onFileClick}
           onFileDoubleClick={onFileDoubleClick}
           onRevealInFileManager={onRevealInFileManager}
+          onCreateFolder={onCreateFolder}
+          onRenameFolder={onRenameFolder}
+          onDeleteFolder={onDeleteFolder}
+          onCopyPath={onCopyPath}
         />
       ))}
     </nav>

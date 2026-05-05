@@ -180,6 +180,9 @@ export const CHANNEL_MAP = {
   // Filesystem search
   searchFiles: invoke(RPC_CHANNELS.fs.SEARCH),
   getWorkspaceFiles: invoke(RPC_CHANNELS.workspace.GET_FILES),
+  createWorkspaceFolder: invoke(RPC_CHANNELS.workspace.CREATE_FOLDER),
+  renameWorkspacePath: invoke(RPC_CHANNELS.workspace.RENAME_PATH),
+  deleteWorkspacePath: invoke(RPC_CHANNELS.workspace.DELETE_PATH),
   watchWorkspaceFiles: invoke(RPC_CHANNELS.workspace.WATCH_FILES),
   unwatchWorkspaceFiles: invoke(RPC_CHANNELS.workspace.UNWATCH_FILES),
   onWorkspaceFilesChanged: listener(RPC_CHANNELS.workspace.FILES_CHANGED),
