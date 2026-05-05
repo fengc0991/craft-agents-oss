@@ -375,6 +375,7 @@ export interface ApiSourceConfig {
   queryParam?: string; // For 'query' auth (e.g., "api_key")
   authScheme?: string; // For 'bearer' auth (default: "Bearer", could be "Token")
   defaultHeaders?: Record<string, string>; // Headers to include with every request
+  defaultParams?: Record<string, unknown>; // Default body/query params merged into every request
   testEndpoint?: ApiTestEndpoint; // Endpoint to use for connection testing
   renewEndpoint?: ApiRenewEndpoint; // Optional token renewal endpoint for non-OAuth sources
 
@@ -561,6 +562,7 @@ export interface ApiConfig {
   documentation?: string;
   docsUrl?: string;
   defaultHeaders?: Record<string, string>;
+  defaultParams?: Record<string, unknown>;
   logo?: string;
   workspaceId?: string;
 }

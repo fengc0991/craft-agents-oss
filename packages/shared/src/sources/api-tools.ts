@@ -224,7 +224,12 @@ export function createApiTool(
       _intent: z.string().optional().describe('REQUIRED: Describe what you are trying to accomplish with this API call (1-2 sentences)'),
     },
     async (args) => {
-      const { path, method, params, _intent } = args;
+      const { path, method, params: userParams, _intent } = args;
+
+      // Merge defaultParams into request (user params take precedence)
+      const params = config.defaultParams
+        ? { ...config.defaultParams, ...userParams }
+        : userParams;
 
       try {
         // Resolve credential - if it's a token getter function, call it to get fresh token

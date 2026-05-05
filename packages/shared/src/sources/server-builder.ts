@@ -254,6 +254,7 @@ export class SourceServerBuilder {
       // and api-tools.ts:buildToolDescription). The model reads guide.md via
       // the prerequisite-manager-enforced Read instead.
       defaultHeaders: api.defaultHeaders,
+      defaultParams: api.defaultParams,
     };
 
     // Map auth type
