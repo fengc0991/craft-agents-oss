@@ -318,6 +318,10 @@ export interface ElectronAPI {
 
   // Filesystem search (for @ mention file selection)
   searchFiles(basePath: string, query: string): Promise<FileSearchResult[]>
+  getWorkspaceFiles(workspaceId: string): Promise<SessionFile[]>
+  watchWorkspaceFiles(workspaceId: string): Promise<void>
+  unwatchWorkspaceFiles(): Promise<void>
+  onWorkspaceFilesChanged(callback: (workspaceId: string) => void): () => void
 
   // Server filesystem browsing (remote mode)
   listServerDirectory(dirPath: string): Promise<DirectoryListingResult>

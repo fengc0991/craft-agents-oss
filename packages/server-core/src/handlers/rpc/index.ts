@@ -22,6 +22,7 @@ import { registerStatusesHandlers } from './statuses'
 import { registerSystemCoreHandlers } from './system'
 import { registerTransferHandlers } from './transfer'
 import { registerWorkspaceCoreHandlers } from './workspace'
+export { cleanupWorkspaceFileWatchForClient } from './workspace'
 import { registerMessagingHandlers } from './messaging'
 
 export function registerCoreRpcHandlers(

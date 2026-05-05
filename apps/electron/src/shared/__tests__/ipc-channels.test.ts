@@ -310,8 +310,12 @@ const EXPECTED_CHANNELS: string[] = [
   'window:openWorkspace',
   'window:setTrafficLights',
   'window:switchWorkspace',
+  'workspace:filesChanged',
+  'workspace:getFiles',
   'workspace:getPermissions',
   'workspace:readImage',
+  'workspace:unwatchFiles',
+  'workspace:watchFiles',
   'workspace:writeImage',
   'workspaceSettings:get',
   'workspaceSettings:update',
@@ -358,6 +362,12 @@ describe('BroadcastEventMap payload shapes', () => {
   it('skills:changed carries (workspaceId, skills)', () => {
     type Payload = BroadcastEventMap[typeof RPC_CHANNELS.skills.CHANGED]
     const _check: AssertTuple<Payload, 2> = true
+    expect(_check).toBe(true)
+  })
+
+  it('workspace:filesChanged carries workspaceId', () => {
+    type Payload = BroadcastEventMap[typeof RPC_CHANNELS.workspace.FILES_CHANGED]
+    const _check: AssertTuple<Payload, 1> = true
     expect(_check).toBe(true)
   })
 })

@@ -36,6 +36,7 @@ import {
 // SessionStatusIcons no longer used - icons come from dynamic sessionStatuses
 import { SourceAvatar } from "@/components/ui/source-avatar"
 import { TopBar } from "./TopBar"
+import { WorkspaceFilesSection } from "./WorkspaceFilesSection"
 import { SquarePenRounded } from "../icons/SquarePenRounded"
 import { McpIcon } from "../icons/McpIcon"
 import { cn } from "@/lib/utils"
@@ -2257,6 +2258,14 @@ function AppShellContent({
                 {/* Primary Nav: All Sessions (▸ Statuses, Flagged, Archived), Labels | Sources, Skills | Settings */}
                 {/* pb-4 provides clearance so the last item scrolls above the mask-fade-bottom gradient */}
                 <div className="flex-1 overflow-y-auto min-h-0 mask-fade-bottom pb-4">
+                <WorkspaceFilesSection
+                  workspaceId={activeWorkspaceId}
+                  workspaceRootPath={activeWorkspace?.rootPath}
+                  expanded={isExpanded('nav:workspace')}
+                  onToggle={() => toggleExpanded('nav:workspace')}
+                  onOpenFile={contextValue.onOpenFile}
+                  className="mb-1"
+                />
                 <LeftSidebar
                   isCollapsed={false}
                   getItemProps={getSidebarItemProps}

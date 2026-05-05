@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs'
-import { join } from 'path'
+import { readdir, stat } from 'node:fs/promises'
+import { join, relative } from 'path'
 import { homedir } from 'os'
-import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
+import { RPC_CHANNELS, type SessionFile } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId, addWorkspace, setActiveWorkspace, updateWorkspaceRemoteServer } from '@craft-agent/shared/config'
 import { perf } from '@craft-agent/shared/utils'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
@@ -18,6 +19,9 @@ export const CORE_HANDLED_CHANNELS = [
   RPC_CHANNELS.window.SWITCH_WORKSPACE,
   RPC_CHANNELS.workspace.READ_IMAGE,
   RPC_CHANNELS.workspace.WRITE_IMAGE,
+  RPC_CHANNELS.workspace.GET_FILES,
+  RPC_CHANNELS.workspace.WATCH_FILES,
+  RPC_CHANNELS.workspace.UNWATCH_FILES,
   RPC_CHANNELS.theme.GET_APP,
   RPC_CHANNELS.theme.GET_PRESETS,
   RPC_CHANNELS.theme.LOAD_PRESET,
@@ -33,6 +37,136 @@ export const CORE_HANDLED_CHANNELS = [
   RPC_CHANNELS.toolIcons.GET_MAPPINGS,
   RPC_CHANNELS.logo.GET_URL,
 ] as const
+
+interface ClientWorkspaceWatchState {
+  watcher: import('fs').FSWatcher
+  workspaceId: string
+  debounceTimer: ReturnType<typeof setTimeout> | null
+}
+
+const clientWorkspaceFileWatches = new Map<string, ClientWorkspaceWatchState>()
+
+const WORKSPACE_SYSTEM_ROOT_NAMES = new Set([
+  'automations.json',
+  'config.json',
+  'labels.json',
+  'permissions.json',
+  'theme.json',
+  'views.json',
+  'labels',
+  'sessions',
+  'skills',
+  'sources',
+  'statuses',
+])
+
+const WORKSPACE_IGNORED_DIRECTORY_NAMES = new Set([
+  '.git',
+  '.hg',
+  '.svn',
+  '.craft-agent',
+  '.DS_Store',
+  'node_modules',
+])
+
+const MAX_WORKSPACE_FILE_TREE_ENTRIES = 5000
+const MAX_WORKSPACE_FILE_TREE_DEPTH = 12
+
+function isWorkspaceSystemRootIcon(name: string): boolean {
+  return /^icon\.(svg|png|jpe?g|webp|gif|ico)$/i.test(name)
+}
+
+function shouldSkipWorkspaceEntry(name: string, relativeSegments: string[], isDirectory: boolean): boolean {
+  if (!name || name.startsWith('.')) return true
+  if (relativeSegments.length === 0 && (WORKSPACE_SYSTEM_ROOT_NAMES.has(name) || isWorkspaceSystemRootIcon(name))) {
+    return true
+  }
+  if (isDirectory && WORKSPACE_IGNORED_DIRECTORY_NAMES.has(name)) return true
+  return false
+}
+
+function shouldIgnoreWorkspaceWatchPath(filename: string): boolean {
+  const normalized = filename.replace(/\\/g, '/')
+  const segments = normalized.split('/').filter(Boolean)
+  if (segments.length === 0) return false
+  const [rootName] = segments
+  if (!rootName) return false
+  return (
+    segments.some(segment => segment.startsWith('.') || WORKSPACE_IGNORED_DIRECTORY_NAMES.has(segment)) ||
+    WORKSPACE_SYSTEM_ROOT_NAMES.has(rootName) ||
+    isWorkspaceSystemRootIcon(rootName)
+  )
+}
+
+async function scanWorkspaceDirectory(
+  rootPath: string,
+  dirPath: string,
+  depth = 0,
+  countRef: { value: number },
+): Promise<SessionFile[]> {
+  if (depth > MAX_WORKSPACE_FILE_TREE_DEPTH || countRef.value >= MAX_WORKSPACE_FILE_TREE_ENTRIES) {
+    return []
+  }
+
+  const entries = await readdir(dirPath, { withFileTypes: true })
+  const files: SessionFile[] = []
+
+  for (const entry of entries) {
+    if (countRef.value >= MAX_WORKSPACE_FILE_TREE_ENTRIES) break
+    const fullPath = join(dirPath, entry.name)
+    const rel = relative(rootPath, fullPath)
+    const relativeSegments = rel.split(/[\\/]+/).filter(Boolean).slice(0, -1)
+    const isDirectory = entry.isDirectory()
+
+    if (entry.isSymbolicLink() || shouldSkipWorkspaceEntry(entry.name, relativeSegments, isDirectory)) {
+      continue
+    }
+
+    countRef.value += 1
+
+    if (isDirectory) {
+      const children = await scanWorkspaceDirectory(rootPath, fullPath, depth + 1, countRef)
+      files.push({
+        name: entry.name,
+        path: fullPath,
+        type: 'directory',
+        children,
+      })
+      continue
+    }
+
+    try {
+      const stats = await stat(fullPath)
+      if (!stats.isFile()) continue
+      files.push({
+        name: entry.name,
+        path: fullPath,
+        type: 'file',
+        size: stats.size,
+      })
+    } catch {
+      // File may have been removed while scanning. Ignore and continue.
+    }
+  }
+
+  return files.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
+    return a.name.localeCompare(b.name)
+  })
+}
+
+export function cleanupWorkspaceFileWatchForClient(clientId: string): void {
+  const state = clientWorkspaceFileWatches.get(clientId)
+  if (!state) return
+
+  if (state.debounceTimer) {
+    clearTimeout(state.debounceTimer)
+    state.debounceTimer = null
+  }
+
+  state.watcher.close()
+  clientWorkspaceFileWatches.delete(clientId)
+}
 
 export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDeps): void {
   const { sessionManager } = deps
@@ -140,6 +274,62 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
       workspaceId,
       remoteServer: workspace?.remoteServer ?? null,
     }
+  })
+
+  // ============================================================
+  // Workspace Files (user-visible root file tree)
+  // ============================================================
+
+  server.handle(RPC_CHANNELS.workspace.GET_FILES, async (_ctx, workspaceId: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) return []
+
+    try {
+      return await scanWorkspaceDirectory(workspace.rootPath, workspace.rootPath, 0, { value: 0 })
+    } catch (error) {
+      deps.platform.logger.error('Failed to get workspace files:', error)
+      return []
+    }
+  })
+
+  server.handle(RPC_CHANNELS.workspace.WATCH_FILES, async (ctx, workspaceId: string) => {
+    const clientId = ctx.clientId
+    cleanupWorkspaceFileWatchForClient(clientId)
+
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) return
+
+    try {
+      const { watch } = await import('fs')
+
+      const state: ClientWorkspaceWatchState = {
+        watcher: null as unknown as import('fs').FSWatcher,
+        workspaceId,
+        debounceTimer: null,
+      }
+
+      state.watcher = watch(workspace.rootPath, { recursive: true }, (_eventType, filename) => {
+        if (filename && shouldIgnoreWorkspaceWatchPath(String(filename))) {
+          return
+        }
+
+        if (state.debounceTimer) {
+          clearTimeout(state.debounceTimer)
+        }
+
+        state.debounceTimer = setTimeout(() => {
+          pushTyped(server, RPC_CHANNELS.workspace.FILES_CHANGED, { to: 'client', clientId }, state.workspaceId)
+        }, 100)
+      })
+
+      clientWorkspaceFileWatches.set(clientId, state)
+    } catch (error) {
+      deps.platform.logger.error('Failed to start workspace file watcher:', error)
+    }
+  })
+
+  server.handle(RPC_CHANNELS.workspace.UNWATCH_FILES, async (ctx) => {
+    cleanupWorkspaceFileWatchForClient(ctx.clientId)
   })
 
   // ============================================================

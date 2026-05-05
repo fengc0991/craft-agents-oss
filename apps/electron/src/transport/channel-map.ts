@@ -179,6 +179,10 @@ export const CHANNEL_MAP = {
 
   // Filesystem search
   searchFiles: invoke(RPC_CHANNELS.fs.SEARCH),
+  getWorkspaceFiles: invoke(RPC_CHANNELS.workspace.GET_FILES),
+  watchWorkspaceFiles: invoke(RPC_CHANNELS.workspace.WATCH_FILES),
+  unwatchWorkspaceFiles: invoke(RPC_CHANNELS.workspace.UNWATCH_FILES),
+  onWorkspaceFilesChanged: listener(RPC_CHANNELS.workspace.FILES_CHANGED),
 
   // Server filesystem browsing (remote mode)
   listServerDirectory: invoke(RPC_CHANNELS.fs.LIST_DIRECTORY),
