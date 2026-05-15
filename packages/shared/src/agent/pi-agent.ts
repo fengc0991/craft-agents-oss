@@ -1407,6 +1407,9 @@ export class PiAgent extends BaseAgent {
       onAuthRequest: (request: unknown) => {
         this.onAuthRequest?.(request as any);
       },
+      onConfigFileChange: (relativePath: string) => {
+        getSessionScopedToolCallbacks(sessionId)?.notifyConfigFileChangeFn?.(relativePath);
+      },
     });
 
     // Attach session self-management bindings (lazy getters from callback registry)

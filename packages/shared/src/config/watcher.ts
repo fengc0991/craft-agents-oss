@@ -793,7 +793,15 @@ export class ConfigWatcher {
   private handleSkillChange(slug: string): void {
     debug('[ConfigWatcher] Skill changed:', slug);
 
+    // Skill contents and icon paths are cached by loadAllSkills(); invalidate on
+    // every SKILL.md/icon event so broadcasts include newly-created skills.
+    invalidateSkillsCache();
     const skill = loadSkill(this.workspaceDir, slug);
+    if (skill) {
+      this.knownSkills.add(slug);
+    } else {
+      this.knownSkills.delete(slug);
+    }
     this.callbacks.onSkillChange?.(slug, skill);
 
     // Check if we need to download an icon from URL
@@ -806,6 +814,7 @@ export class ConfigWatcher {
         .then((iconPath) => {
           if (iconPath) {
             // Reload the skill with the new icon and emit another change
+            invalidateSkillsCache();
             const updatedSkill = loadSkill(this.workspaceDir, slug);
             debug('[ConfigWatcher] Icon downloaded, emitting updated skill:', slug);
             this.callbacks.onSkillChange?.(slug, updatedSkill);

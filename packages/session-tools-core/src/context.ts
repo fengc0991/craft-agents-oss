@@ -205,6 +205,12 @@ export interface SessionToolContext {
   loadSourceConfig(sourceSlug: string): SourceConfig | null;
 
   /**
+   * Notify the host that a workspace config file changed.
+   * Used as a fallback for filesystem watchers that miss files inside newly-created directories.
+   */
+  notifyConfigFileChange?(relativePath: string): void;
+
+  /**
    * Save a source config to the workspace.
    */
   saveSourceConfig?(source: SourceConfig): void;

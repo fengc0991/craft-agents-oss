@@ -400,9 +400,9 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
       context:
         'The user wants to add a new skill to their workspace. ' +
         'Skills are specialized instructions with a SKILL.md file containing YAML frontmatter (name, description) and markdown instructions. ' +
-        'Ask clarifying questions if needed: What should the skill do? When should it trigger? ' +
-        'Create the skill folder and SKILL.md in the workspace skills directory. ' +
-        'Follow the patterns in ~/.craft-agent/docs/skills.md. ' +
+        'For simple requests, do not read documentation first; create the skill directly. ' +
+        'Use a lowercase hyphenated slug, create the folder under the workspace skills directory, and write SKILL.md with only name and description in YAML frontmatter followed by concise instructions. ' +
+        'Ask a clarifying question only if the skill behavior or trigger is genuinely unclear. ' +
         'After creating the skill, call skill_validate with the skill slug to verify the SKILL.md file.',
     },
     example: 'Review PRs following our code standards',

@@ -117,6 +117,10 @@ export async function handleSkillValidate(
   const tierInfo = `Validated from ${resolved.tier} tier: ${resolved.path}`;
   const formatted = formatValidationResult(result);
 
+  if (result.valid && resolved.tier === 'workspace') {
+    ctx.notifyConfigFileChange?.(`skills/${skillSlug}/SKILL.md`);
+  }
+
   // If workingDirectory couldn't be resolved, warn that project tier was skipped
   const warnings: string[] = [];
   if (!workingDirectory) {

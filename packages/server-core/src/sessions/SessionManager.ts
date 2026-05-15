@@ -3876,6 +3876,9 @@ export class SessionManager implements ISessionManager {
 
           return { resolved: null, available }
         },
+        notifyConfigFileChangeFn: (relativePath: string) => {
+          this.notifyConfigFileChange(managed.workspace.rootPath, relativePath)
+        },
         sendAgentMessageFn: async (sessionId: string, message: string, attachments?: Array<{ path: string; name?: string }>) => {
           // Build FileAttachment[] from paths (same pattern as spawn_session)
           let fileAttachments: FileAttachment[] | undefined

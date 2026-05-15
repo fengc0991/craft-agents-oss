@@ -239,6 +239,10 @@ export function getSessionScopedTools(
         const callbacks = getSessionScopedToolCallbacks(sessionId);
         callbacks?.onAuthRequest?.(request as AuthRequest);
       },
+      onConfigFileChange: (relativePath: string) => {
+        const callbacks = getSessionScopedToolCallbacks(sessionId);
+        callbacks?.notifyConfigFileChangeFn?.(relativePath);
+      },
     });
 
     // Attach session self-management bindings (lazy getters from callback registry)

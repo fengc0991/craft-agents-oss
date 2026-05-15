@@ -24,4 +24,12 @@ describe('EditPopover add-source variants', () => {
   it('keeps add-skill aligned with the same inline flow', () => {
     expectInlineExecutionFor('add-skill')
   })
+
+  it('keeps add-skill self-contained instead of forcing a docs lookup', () => {
+    const addSkillConfig = editPopoverSource.match(/'add-skill':\s*\(location\)\s*=>\s*\(\{[\s\S]*?inlineExecution:\s*true,/)?.[0] ?? ''
+
+    expect(addSkillConfig).toContain('do not read documentation first')
+    expect(addSkillConfig).toContain('skill_validate')
+    expect(addSkillConfig).not.toContain('~/.craft-agent/docs/skills.md')
+  })
 })
