@@ -85,6 +85,11 @@ export interface WsRpcServerOptions {
   /** Token validator. Called when requireAuth is true. */
   validateToken?: (token: string) => Promise<boolean>
   /**
+   * Optional Web UI session-token validator.
+   * Used when browsers cannot send cookies to the WebSocket URL.
+   */
+  validateSessionToken?: (token: string) => Promise<boolean>
+  /**
    * Optional cookie-based session validator (for web UI auth).
    * Called with the Cookie header from the HTTP upgrade request.
    * If provided, a valid session cookie is accepted as an alternative to a bearer token.
@@ -136,6 +141,7 @@ export class WsRpcServer implements RpcServer {
   private readonly requestedPort: number
   private readonly requireAuth: boolean
   private readonly validateToken: ((token: string) => Promise<boolean>) | null
+  private readonly validateSessionToken: ((token: string) => Promise<boolean>) | null
   private readonly validateSessionCookie: ((cookieHeader: string | null) => Promise<boolean>) | null
   private readonly serverId: string
   private readonly tlsOptions: WsRpcTlsOptions | null
@@ -150,6 +156,7 @@ export class WsRpcServer implements RpcServer {
     this.requestedPort = opts?.port ?? 0
     this.requireAuth = opts?.requireAuth ?? false
     this.validateToken = opts?.validateToken ?? null
+    this.validateSessionToken = opts?.validateSessionToken ?? null
     this.validateSessionCookie = opts?.validateSessionCookie ?? null
     this.serverId = opts?.serverId ?? 'local'
     this.serverVersion = opts?.serverVersion ?? ''
@@ -410,7 +417,7 @@ export class WsRpcServer implements RpcServer {
           return
         }
 
-        // Auth check — bearer token OR session cookie (web UI)
+        // Auth check — bearer token OR Web UI session auth.
         if (this.requireAuth) {
           let authenticated = false
 
@@ -419,7 +426,13 @@ export class WsRpcServer implements RpcServer {
             authenticated = await this.validateToken(envelope.token)
           }
 
-          // 2. Fallback: try session cookie from HTTP upgrade request (web UI path)
+          // 2. Try Web UI session token when the browser cannot send the
+          // session cookie to a cross-origin WebSocket URL.
+          if (!authenticated && envelope.token && this.validateSessionToken) {
+            authenticated = await this.validateSessionToken(envelope.token)
+          }
+
+          // 3. Fallback: try session cookie from HTTP upgrade request (web UI path)
           if (!authenticated && this.validateSessionCookie && upgradeRequestCookie) {
             authenticated = await this.validateSessionCookie(upgradeRequestCookie)
           }

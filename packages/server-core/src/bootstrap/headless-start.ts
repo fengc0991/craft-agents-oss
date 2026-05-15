@@ -40,6 +40,8 @@ export interface ServerBootstrapOptions<TSessionManager, THandlerDeps> {
   serverVersion?: string
   /** TLS configuration. When provided, the server listens on wss:// instead of ws://. */
   tls?: WsRpcTlsOptions
+  /** Token-based session validator for web UI auth on WebSocket handshake. */
+  validateSessionToken?: (token: string) => Promise<boolean>
   /** Cookie-based session validator for web UI auth on WebSocket upgrade. */
   validateSessionCookie?: (cookieHeader: string | null) => Promise<boolean>
   /**
@@ -294,6 +296,7 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
     port: rpcPort,
     requireAuth: true,
     validateToken: async (t) => t === serverToken,
+    validateSessionToken: options.validateSessionToken,
     validateSessionCookie: options.validateSessionCookie,
     serverId: options.serverId ?? 'headless',
     serverVersion: options.serverVersion,

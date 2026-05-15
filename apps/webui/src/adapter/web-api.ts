@@ -59,6 +59,8 @@ function getSystemTheme(): boolean {
 export interface WebApiOptions {
   /** WebSocket server URL (ws:// or wss://) */
   serverUrl: string
+  /** Web UI session token for WS auth when cookies cannot cross origins. */
+  token?: string
   /** Workspace ID to connect as. */
   workspaceId?: string
 }
@@ -67,9 +69,10 @@ export function createWebApi(options: WebApiOptions): {
   api: ElectronAPI
   client: WsRpcClient
 } {
-  const { serverUrl, workspaceId } = options
+  const { serverUrl, token, workspaceId } = options
 
   const client = new WsRpcClient(serverUrl, {
+    token,
     workspaceId,
     autoReconnect: true,
     mode: 'remote',

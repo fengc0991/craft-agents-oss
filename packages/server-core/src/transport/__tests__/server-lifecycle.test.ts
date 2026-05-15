@@ -16,12 +16,14 @@ function createServer(opts?: {
   maxClients?: number
   requireAuth?: boolean
   validateToken?: (token: string) => Promise<boolean>
+  validateSessionToken?: (token: string) => Promise<boolean>
 }) {
   return new WsRpcServer({
     host: '127.0.0.1',
     port: 0,
     requireAuth: opts?.requireAuth ?? true,
     validateToken: opts?.validateToken ?? (async (t) => t === TEST_TOKEN),
+    validateSessionToken: opts?.validateSessionToken,
     maxClients: opts?.maxClients,
     serverId: 'test',
   })
@@ -102,6 +104,21 @@ describe('WsRpcServer lifecycle', () => {
 
     await expect(handshake(url, 'wrong-token')).rejects.toThrow()
     expect(server.getConnectedClientCount()).toBe(0)
+  })
+
+  it('accepts valid web UI session token', async () => {
+    server = createServer({
+      validateSessionToken: async (t) => t === 'valid-session-token',
+    })
+    await server.listen()
+    const url = `ws://127.0.0.1:${server.port}`
+
+    const { ws, clientId } = await handshake(url, 'valid-session-token')
+    openSockets.push(ws)
+
+    expect(clientId).toBeTruthy()
+    expect(ws.readyState).toBe(WebSocket.OPEN)
+    expect(server.getConnectedClientCount()).toBe(1)
   })
 
   it('rejects missing token', async () => {

@@ -82,7 +82,7 @@ export default function App() {
         throw new Error(`Failed to fetch config: ${configRes.status}`)
       }
 
-      const { wsUrl } = await configRes.json() as { wsUrl: string }
+      const { wsUrl, wsToken } = await configRes.json() as { wsUrl: string; wsToken?: string }
       if (!wsUrl) throw new Error('Server did not return a WebSocket URL')
 
       // 2. Determine workspace — check URL params first
@@ -109,7 +109,7 @@ export default function App() {
         clientRef.current.destroy()
       }
 
-      const { api, client } = createWebApi({ serverUrl: wsUrl, workspaceId })
+      const { api, client } = createWebApi({ serverUrl: wsUrl, token: wsToken, workspaceId })
       clientRef.current = client
 
       // 4. Set window.electronAPI — must happen before any Electron component mounts

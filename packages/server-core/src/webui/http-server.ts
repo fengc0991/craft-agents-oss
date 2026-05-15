@@ -17,6 +17,7 @@ import {
   verifyPassword,
   createSessionToken,
   validateSession,
+  extractSessionCookie,
   buildSessionCookie,
   buildLogoutCookie,
 } from './auth'
@@ -353,6 +354,7 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
       }
       return Response.json({
         wsUrl: resolveWebSocketUrl(req, { publicWsUrl, wsProtocol, wsPort }),
+        wsToken: extractSessionCookie(req.headers.get('cookie')),
       })
     }
 

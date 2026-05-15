@@ -57,6 +57,10 @@ function extractSessionCookie(res: Response): string {
   return setCookie!.split(';')[0]!
 }
 
+function extractSessionCookieValue(res: Response): string {
+  return extractSessionCookie(res).replace(/^craft_session=/, '')
+}
+
 afterEach(() => {
   while (SERVERS.length > 0) {
     SERVERS.pop()?.stop()
@@ -92,6 +96,7 @@ describe('startWebuiHttpServer', () => {
     expect(configRes.status).toBe(200)
     expect(await configRes.json()).toEqual({
       wsUrl: 'wss://127.0.0.1:9100',
+      wsToken: extractSessionCookieValue(authRes),
     })
   })
 
@@ -161,6 +166,7 @@ describe('startWebuiHttpServer', () => {
     expect(configRes.status).toBe(200)
     expect(await configRes.json()).toEqual({
       wsUrl: 'wss://craft.example.com:9100',
+      wsToken: extractSessionCookieValue(authRes),
     })
   })
 
@@ -186,6 +192,7 @@ describe('startWebuiHttpServer', () => {
     expect(configRes.status).toBe(200)
     expect(await configRes.json()).toEqual({
       wsUrl: 'wss://craft.example.com/ws',
+      wsToken: extractSessionCookieValue(authRes),
     })
   })
 })
