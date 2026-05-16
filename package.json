@@ -84,6 +84,7 @@
     "viewer:build": "vite build --config apps/viewer/vite.config.ts",
     "viewer:preview": "vite preview --config apps/viewer/vite.config.ts",
     "webui:dev": "lsof -ti:5175 | xargs kill -9 2>/dev/null; vite dev --config apps/webui/vite.config.ts",
+    "webui:dev:full": "bash scripts/dev-webui.sh",
     "webui:clean": "rm -rf apps/webui/dist",
     "webui:build": "vite build --config apps/webui/vite.config.ts",
     "webui:typecheck": "cd apps/webui && bun run typecheck",

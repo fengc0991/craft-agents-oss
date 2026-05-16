@@ -173,6 +173,41 @@ CRAFT_SERVER_TOKEN=<generated-token>
 
 Copy these values and use them to connect the desktop app.
 
+### WebUI + Backend Dev Quick Start
+
+To run the browser WebUI and the headless server together from one shell:
+
+```bash
+bash scripts/dev-webui.sh
+```
+
+The script starts the backend on `CRAFT_RPC_PORT` (default `9100`, bound to `127.0.0.1`) and the Vite WebUI on `CRAFT_WEBUI_PORT` (default `5175`). Browser API and WebSocket traffic go through the Vite proxy, so normally you only need to open the printed WebUI URL. The script generates a persistent `CRAFT_SERVER_TOKEN` in `~/.craft-agent/webui.env` when one is not already set, prints the WebUI URL and login password, and stops both processes when you press `Ctrl+C`.
+
+Common overrides:
+
+```bash
+# Custom ports
+CRAFT_RPC_PORT=9100 CRAFT_WEBUI_PORT=5175 bash scripts/dev-webui.sh
+
+# Remote browser access through a known IP or domain
+CRAFT_WEBUI_PUBLIC_HOST=203.0.113.5 bash scripts/dev-webui.sh
+
+# Reuse a token explicitly
+CRAFT_SERVER_TOKEN=<token> bash scripts/dev-webui.sh
+```
+
+You can also run the same script through Bun:
+
+```bash
+bun run webui:dev:full
+```
+
+For a built WebUI served directly by the backend on one port, use:
+
+```bash
+bash scripts/start-webui.sh
+```
+
 ### Connecting the Desktop App
 
 Launch the Electron app in thin-client mode by passing the server URL and token:
