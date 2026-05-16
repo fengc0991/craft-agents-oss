@@ -16,6 +16,8 @@
  *     assistant text (`text_complete` with `isIntermediate`) is dropped.
  *     On adapters without `messageEditing`, degrades to a single
  *     send-on-complete (identical to `final_only`).
+ *     Lark/Feishu maps this to a timeline of separate process, checkpoint,
+ *     and final messages so tool progress stays visible.
  *
  *   - `final_only`: silent until `complete`, then sends one message with
  *     the accumulated final text. Nothing is sent for empty completions.
@@ -85,6 +87,14 @@ interface RenderState {
   progressMessageId: string | null
   /** Progress: last status label written to the bubble, to avoid redundant edits. */
   progressStatus: string | null
+
+  // --- Lark timeline mode ------------------------------------------------
+  /** Lark timeline: exact assistant texts already sent this run. */
+  timelineSentTextKeys: Set<string>
+  /** Lark timeline: whether a final assistant text has already been sent. */
+  timelineFinalSent: boolean
+  /** Lark timeline: tool_use ids already announced this run. */
+  timelineAnnouncedToolIds: Set<string>
 }
 
 const DEFAULT_EDIT_INTERVAL_MS = 3500
@@ -154,6 +164,9 @@ export class Renderer {
         finalBuffer: '',
         progressMessageId: null,
         progressStatus: null,
+        timelineSentTextKeys: new Set(),
+        timelineFinalSent: false,
+        timelineAnnouncedToolIds: new Set(),
       }
       this.states.set(bindingId, state)
     }
@@ -190,7 +203,11 @@ export class Renderer {
     }
 
     const mode = resolveResponseMode(binding.config.responseMode, binding.config.streamResponses)
-    const effectiveMode = binding.platform === 'lark' && mode === 'progress' ? 'final_only' : mode
+    if (binding.platform === 'lark' && mode === 'progress') {
+      return this.handleLarkTimeline(event, binding, adapter)
+    }
+
+    const effectiveMode = mode
     switch (effectiveMode) {
       case 'streaming':
         return this.handleStreaming(event, binding, adapter)
@@ -198,6 +215,70 @@ export class Renderer {
         return this.handleProgress(event, binding, adapter)
       case 'final_only':
         return this.handleFinalOnly(event, binding, adapter)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Mode: Lark timeline (default Lark progress — process messages + one final)
+  // ---------------------------------------------------------------------------
+
+  private async handleLarkTimeline(
+    event: SessionEvent,
+    binding: ChannelBinding,
+    adapter: PlatformAdapter,
+  ): Promise<void> {
+    const state = this.getState(binding.id)
+
+    switch (event.type) {
+      case 'text_delta': {
+        const delta = typeof event.delta === 'string' ? event.delta : ''
+        if (delta) state.textBuffer += delta
+        return
+      }
+
+      case 'text_complete': {
+        const text = typeof event.text === 'string' ? event.text : state.textBuffer
+        state.textBuffer = ''
+        const isIntermediate = Boolean(event.isIntermediate)
+        if (!isIntermediate && state.timelineFinalSent) return
+        const sent = await this.sendTimelineText(adapter, binding, text, isIntermediate ? 'intermediate' : 'final', state)
+        if (sent && !isIntermediate) state.timelineFinalSent = true
+        return
+      }
+
+      case 'tool_start': {
+        const toolUseId = typeof event.toolUseId === 'string' ? event.toolUseId : ''
+        if (toolUseId && state.timelineAnnouncedToolIds.has(toolUseId)) return
+        if (toolUseId) state.timelineAnnouncedToolIds.add(toolUseId)
+
+        const toolName = typeof event.toolName === 'string' ? event.toolName : 'tool'
+        const displayName =
+          typeof event.toolDisplayName === 'string' && event.toolDisplayName.length > 0
+            ? event.toolDisplayName
+            : typeof (event.toolDisplayMeta as { displayName?: unknown } | undefined)?.displayName === 'string'
+              ? (event.toolDisplayMeta as { displayName: string }).displayName
+              : toolName
+        const intent = typeof event.toolIntent === 'string' ? event.toolIntent.trim() : ''
+        const text = intent ? `🔧 ${displayName}\n${intent}` : `🔧 ${displayName}...`
+        await adapter.sendText(binding.channelId, text, bindingOpts(binding))
+        return
+      }
+
+      case 'tool_result': {
+        if (event.isError) {
+          const toolName = typeof event.toolName === 'string' ? event.toolName : 'tool'
+          await adapter.sendText(binding.channelId, `❌ ${toolName} failed`, bindingOpts(binding))
+        }
+        return
+      }
+
+      case 'complete': {
+        if (!state.timelineFinalSent && state.textBuffer.trim()) {
+          await this.sendTimelineText(adapter, binding, state.textBuffer, 'final', state)
+        }
+        this.resetRun(state)
+        return
+      }
     }
   }
 
@@ -219,7 +300,7 @@ export class Renderer {
         state.textBuffer += delta
         state.processing = true
 
-        if (adapter.capabilities.messageEditing) {
+        if (canLiveEditStreaming(binding, adapter)) {
           await this.handleStreamingDelta(state, binding, adapter)
         }
         break
@@ -229,7 +310,7 @@ export class Renderer {
         const text = typeof event.text === 'string' ? event.text : state.textBuffer
         this.cancelEditTimer(state)
 
-        if (state.streamingMessageId && adapter.capabilities.messageEditing) {
+        if (state.streamingMessageId && canLiveEditStreaming(binding, adapter)) {
           if (text.trim()) {
             await this.tryEditMessage(adapter, binding, state.streamingMessageId, text.trim(), state)
           }
@@ -695,6 +776,9 @@ Approve in the desktop app to continue.`,
     state.finalBuffer = ''
     state.progressMessageId = null
     state.progressStatus = null
+    state.timelineSentTextKeys.clear()
+    state.timelineFinalSent = false
+    state.timelineAnnouncedToolIds.clear()
   }
 
   /** Send text, splitting if it exceeds platform limits. */
@@ -725,6 +809,24 @@ Approve in the desktop app to continue.`,
       this.states.delete(bindingId)
     }
   }
+
+  private async sendTimelineText(
+    adapter: PlatformAdapter,
+    binding: ChannelBinding,
+    text: string,
+    kind: 'intermediate' | 'final',
+    state: RenderState,
+  ): Promise<boolean> {
+    const trimmed = text.trim()
+    if (!trimmed) return false
+
+    const key = `${kind}:${collapseWhitespace(trimmed)}`
+    if (state.timelineSentTextKeys.has(key)) return false
+    state.timelineSentTextKeys.add(key)
+
+    await this.sendText(adapter, binding, trimmed)
+    return true
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -738,6 +840,16 @@ function resolveResponseMode(
   if (responseMode) return responseMode
   // Legacy configs (pre-responseMode field): honour explicit streamResponses.
   return streamResponses === false ? 'final_only' : 'streaming'
+}
+
+function canLiveEditStreaming(binding: ChannelBinding, adapter: PlatformAdapter): boolean {
+  // Lark/Feishu message edits can silently expire; posting complete checkpoints
+  // keeps the process timeline readable and avoids stale partial bubbles.
+  return binding.platform !== 'lark' && adapter.capabilities.messageEditing
+}
+
+function collapseWhitespace(text: string): string {
+  return text.replace(/\s+/g, ' ')
 }
 
 function appendFinal(existing: string, next: string): string {

@@ -240,7 +240,8 @@ export interface PlatformAdapter {
  * - `progress` — one evolving message per run. Posts a "💭 thinking…"
  *   bubble on first activity, edits it as tools run, replaces it with
  *   the final answer on `complete`. Intermediate assistant text is
- *   dropped. Default for new bindings.
+ *   dropped. Default for new bindings. Lark/Feishu renders this as a
+ *   timeline of separate process, checkpoint, and final messages.
  * - `final_only` — silent until `complete`, then one message with the
  *   final text. Nothing is posted if the run has no final text.
  */

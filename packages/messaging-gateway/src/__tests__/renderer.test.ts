@@ -271,20 +271,28 @@ describe('Renderer — progress mode (default)', () => {
     expect(edits.map((e) => e.text)).toEqual(['hello world'])
   })
 
-  it('treats Lark progress bindings as final-only to avoid stale thinking bubbles', async () => {
+  it('treats Lark progress bindings as a process timeline with one final answer', async () => {
     const adapter = makeAdapter({ markdown: 'lark-post' })
+    ;(adapter as { platform: 'lark' }).platform = 'lark'
     const binding = makeBinding()
     binding.platform = 'lark'
 
     await play(renderer, binding, adapter, [
-      ev.delta('hello '),
-      ev.delta('world'),
-      ev.final('hello world'),
+      ev.toolStart('Write File'),
+      ev.delta('checking '),
+      ev.delta('context'),
+      ev.intermediate('I checked the context.'),
+      ev.delta('final '),
+      ev.delta('answer'),
+      ev.final('Final: 42'),
+      ev.final('Final: 42'),
       ev.complete(),
     ])
 
     expect(adapter.calls).toEqual([
-      { kind: 'sendText', channelId: 'chan-1', text: 'hello world', messageId: '1' },
+      { kind: 'sendText', channelId: 'chan-1', text: '🔧 Write File...', messageId: '1' },
+      { kind: 'sendText', channelId: 'chan-1', text: 'I checked the context.', messageId: '2' },
+      { kind: 'sendText', channelId: 'chan-1', text: 'Final: 42', messageId: '3' },
     ])
   })
 
