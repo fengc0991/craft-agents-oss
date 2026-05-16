@@ -141,6 +141,10 @@ function resolveLarkFileType(filename: string): LarkUploadFileType {
   }
 }
 
+function createMessageUuid(): string {
+  return `craft_${randomBytes(12).toString('hex')}`
+}
+
 interface LarkApiEnvelope<TData extends object = Record<string, unknown>> {
   code?: number
   msg?: string
@@ -172,6 +176,20 @@ function extractLarkErrorMeta(err: unknown): MessagingLogMeta {
   }
   if (errObj.cause instanceof Error) meta.cause = errObj.cause.message
   return meta
+}
+
+function shouldFallbackPostToText(err: unknown): boolean {
+  const errObj = (err ?? {}) as {
+    code?: unknown
+    response?: { status?: unknown; data?: unknown }
+  }
+  const status = errObj.response?.status
+  if (typeof status === 'number') {
+    return status >= 400 && status < 500
+  }
+  const responseData = errObj.response?.data
+  if (responseData && typeof responseData === 'object') return true
+  return typeof errObj.code === 'number'
 }
 
 /**
@@ -565,14 +583,55 @@ export class LarkAdapter implements PlatformAdapter {
         : wrapAsTrivialPost(formatted.text, this.postLocale)
     const msgType = 'post' as const
     const content = JSON.stringify(post)
+    const uuid = createMessageUuid()
 
-    const result = await this.client.im.message.create({
-      params: { receive_id_type: 'chat_id' },
-      data: { receive_id: channelId, msg_type: msgType, content },
-    })
-    const messageId = result?.data?.message_id ?? ''
-    if (messageId) this.sentMsgTypes.set(messageId, msgType)
-    return { platform: 'lark', channelId, messageId }
+    try {
+      const result = await this.client.im.message.create({
+        params: { receive_id_type: 'chat_id' },
+        data: { receive_id: channelId, msg_type: msgType, content, uuid },
+      })
+      const messageId = result?.data?.message_id ?? ''
+      if (messageId) this.sentMsgTypes.set(messageId, msgType)
+      return { platform: 'lark', channelId, messageId }
+    } catch (postErr: unknown) {
+      if (!shouldFallbackPostToText(postErr)) {
+        this.log.warn('[lark] post message failed with ambiguous delivery status', {
+          event: 'lark_send_post_ambiguous_failed',
+          chatId: channelId,
+          payloadSize: content.length,
+          ...extractLarkErrorMeta(postErr),
+        })
+        throw postErr
+      }
+
+      this.log.warn('[lark] post message failed; retrying as text', {
+        event: 'lark_send_post_fallback',
+        chatId: channelId,
+        payloadSize: content.length,
+        payloadPreview: content.slice(0, 500),
+        ...extractLarkErrorMeta(postErr),
+      })
+
+      const textMsgType = 'text' as const
+      const textContent = JSON.stringify({ text })
+      try {
+        const result = await this.client.im.message.create({
+          params: { receive_id_type: 'chat_id' },
+          data: { receive_id: channelId, msg_type: textMsgType, content: textContent, uuid },
+        })
+        const messageId = result?.data?.message_id ?? ''
+        if (messageId) this.sentMsgTypes.set(messageId, textMsgType)
+        return { platform: 'lark', channelId, messageId }
+      } catch (textErr: unknown) {
+        this.log.error('[lark] text fallback also failed', {
+          event: 'lark_send_text_fallback_failed',
+          chatId: channelId,
+          payloadSize: textContent.length,
+          ...extractLarkErrorMeta(textErr),
+        })
+        throw textErr
+      }
+    }
   }
 
   async editMessage(

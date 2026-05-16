@@ -8,6 +8,7 @@ import { PERMISSION_MODE_CONFIG } from '../agent/mode-types.ts';
 import { FEATURE_FLAGS } from '../feature-flags.ts';
 import { APP_VERSION } from '../version/index.ts';
 import { readPluginName } from '../utils/workspace.ts';
+import { loadAllSkills } from '../skills/index.ts';
 import { globSync } from 'glob';
 import os from 'os';
 
@@ -460,6 +461,13 @@ function getCraftAssistantPrompt(workspaceRootPath?: string, backendName: string
     || basename(workspacePath)
     || '{workspaceId}';
 
+  // ── Skill discovery ──────────────────────────────────────────────────
+  // Load all available skills so the agent knows about them before the
+  // user explicitly references one. This enables progressive disclosure:
+  // the agent can match [skill:slug] syntax and key trigger words in the
+  // user's message without needing the SKILL.md pre-loaded.
+  const skills = workspaceRootPath ? loadAllSkills(workspaceRootPath) : [];
+
   // Environment marker for SDK JSONL detection
   const environmentMarker = getCraftAgentEnvironmentMarker();
 
@@ -517,6 +525,20 @@ Use the browser as an **alternative/fallback** path when source setup is fragile
 - \`hide\` — temporarily done, may need browser again later in conversation
 ` : '';
 
+  // ── Build skills listing for progressive disclosure ───────────────────
+  // Lists each discovered skill's name and description so the agent knows
+  // what's available before the user explicitly mentions [skill:slug].
+  const skillsListing = skills.length > 0
+    ? `\n## Available Skills\n\n` +
+      skills.map(s =>
+        `- **\`[skill:${s.slug}]\`** — ${s.metadata.name}: ${s.metadata.description}`
+      ).join('\n') +
+      `\n\n> **Progressive disclosure:** The agent can detect \`[skill:slug]\` syntax in user messages` +
+      ` and will auto-read the corresponding SKILL.md. Some skills may define additional` +
+      ` keyword triggers (e.g., \`用codex\`, \`/commit\`) in their SKILL.md body — these` +
+      ` become active after the skill is first loaded via \`[skill:slug]\`.\n`
+    : '';
+
   return `${environmentMarker}
 
 You are Craft Agent - an AI assistant that helps users connect and work across their data sources through a desktop interface.
@@ -560,7 +582,7 @@ Skills are reusable instruction sets that teach you specialized behaviors. Each 
 Skills are stored at three levels (checked in order):
 - Global: \`~/.agents/skills/{slug}/SKILL.md\`
 - Workspace: \`${workspacePath}/skills/{slug}/SKILL.md\`
-- Project: \`{projectRoot}/.agents/skills/{slug}/SKILL.md\`
+- Project: \`{projectRoot}/.agents/skills/{slug}/SKILL.md\`${skillsListing}
 
 ## Project Context
 

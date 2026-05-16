@@ -91,8 +91,8 @@ interface RenderState {
   // --- Lark timeline mode ------------------------------------------------
   /** Lark timeline: exact assistant texts already sent this run. */
   timelineSentTextKeys: Set<string>
-  /** Lark timeline: whether a final assistant text has already been sent. */
-  timelineFinalSent: boolean
+  /** Lark timeline: final text kept for a retry if the initial send fails. */
+  timelinePendingFinal: string
   /** Lark timeline: tool_use ids already announced this run. */
   timelineAnnouncedToolIds: Set<string>
 }
@@ -137,6 +137,8 @@ export type PermissionMessageRecorder = (
 export class Renderer {
   /** Per-binding render state. Keyed by binding.id */
   private states = new Map<string, RenderState>()
+  /** Per-binding event chain. Gateway dispatch is fire-and-forget, so serialize stateful rendering. */
+  private queues = new Map<string, Promise<void>>()
   private readonly planTokens: PlanTokenRegistry | undefined
   private readonly recordPlanMessage: PlanMessageRecorder | undefined
   private readonly recordPermissionMessage: PermissionMessageRecorder | undefined
@@ -165,7 +167,7 @@ export class Renderer {
         progressMessageId: null,
         progressStatus: null,
         timelineSentTextKeys: new Set(),
-        timelineFinalSent: false,
+        timelinePendingFinal: '',
         timelineAnnouncedToolIds: new Set(),
       }
       this.states.set(bindingId, state)
@@ -175,6 +177,27 @@ export class Renderer {
 
   /** Handle an outbound session event for a specific binding. */
   async handle(
+    event: SessionEvent,
+    binding: ChannelBinding,
+    adapter: PlatformAdapter,
+  ): Promise<void> {
+    const previous = this.queues.get(binding.id) ?? Promise.resolve()
+    const run = previous
+      .catch(() => {})
+      .then(() => this.handleEvent(event, binding, adapter))
+    const settled = run.catch(() => {})
+
+    this.queues.set(binding.id, settled)
+    try {
+      await run
+    } finally {
+      if (this.queues.get(binding.id) === settled) {
+        this.queues.delete(binding.id)
+      }
+    }
+  }
+
+  private async handleEvent(
     event: SessionEvent,
     binding: ChannelBinding,
     adapter: PlatformAdapter,
@@ -219,7 +242,7 @@ export class Renderer {
   }
 
   // ---------------------------------------------------------------------------
-  // Mode: Lark timeline (default Lark progress — process messages + one final)
+  // Mode: Lark timeline (default Lark progress — process + final checkpoints)
   // ---------------------------------------------------------------------------
 
   private async handleLarkTimeline(
@@ -240,9 +263,18 @@ export class Renderer {
         const text = typeof event.text === 'string' ? event.text : state.textBuffer
         state.textBuffer = ''
         const isIntermediate = Boolean(event.isIntermediate)
-        if (!isIntermediate && state.timelineFinalSent) return
-        const sent = await this.sendTimelineText(adapter, binding, text, isIntermediate ? 'intermediate' : 'final', state)
-        if (sent && !isIntermediate) state.timelineFinalSent = true
+        if (!isIntermediate && text.trim()) {
+          state.timelinePendingFinal = appendFinal(state.timelinePendingFinal, text)
+        }
+        const timelineText = !isIntermediate && state.timelinePendingFinal.trim()
+          ? state.timelinePendingFinal
+          : text
+        const sent = await this.sendTimelineText(adapter, binding, timelineText, isIntermediate ? 'intermediate' : 'final', state)
+        if (sent && !isIntermediate) {
+          state.timelinePendingFinal = ''
+        } else if (!isIntermediate && state.timelineSentTextKeys.has(`final:${collapseWhitespace(timelineText.trim())}`)) {
+          state.timelinePendingFinal = ''
+        }
         return
       }
 
@@ -273,8 +305,9 @@ export class Renderer {
       }
 
       case 'complete': {
-        if (!state.timelineFinalSent && state.textBuffer.trim()) {
-          await this.sendTimelineText(adapter, binding, state.textBuffer, 'final', state)
+        const finalText = state.timelinePendingFinal.trim() || state.textBuffer.trim()
+        if (finalText) {
+          await this.sendTimelineText(adapter, binding, finalText, 'final', state)
         }
         this.resetRun(state)
         return
@@ -777,7 +810,7 @@ Approve in the desktop app to continue.`,
     state.progressMessageId = null
     state.progressStatus = null
     state.timelineSentTextKeys.clear()
-    state.timelineFinalSent = false
+    state.timelinePendingFinal = ''
     state.timelineAnnouncedToolIds.clear()
   }
 
@@ -822,9 +855,9 @@ Approve in the desktop app to continue.`,
 
     const key = `${kind}:${collapseWhitespace(trimmed)}`
     if (state.timelineSentTextKeys.has(key)) return false
-    state.timelineSentTextKeys.add(key)
 
     await this.sendText(adapter, binding, trimmed)
+    state.timelineSentTextKeys.add(key)
     return true
   }
 }

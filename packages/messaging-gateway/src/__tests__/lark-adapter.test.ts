@@ -179,6 +179,71 @@ describe('LarkAdapter — static contract', () => {
     })
   })
 
+  it('falls back to text messages when Lark rejects the post payload', async () => {
+    const adapter = new LarkAdapter()
+    const calls = installFakeLarkClient(adapter)
+    ;(adapter as unknown as {
+      client: {
+        im: {
+          message: {
+            create: (args: unknown) => Promise<{ data?: { message_id?: string } }>
+          }
+        }
+      }
+    }).client.im.message.create = async (args: unknown) => {
+      calls.createCalls.push(args)
+      const msgType = (args as { data?: { msg_type?: string } }).data?.msg_type
+      if (msgType === 'post') {
+        throw Object.assign(new Error('invalid post content'), {
+          response: { status: 400, data: { code: 230001, msg: 'invalid post content' } },
+        })
+      }
+      return { data: { message_id: 'om_text' } }
+    }
+
+    const text = '### 文件\n| path | note |\n| --- | --- |\n| config.json | ok |'
+    const sent = await adapter.sendText('oc_1', text)
+
+    expect(sent.messageId).toBe('om_text')
+    expect(
+      calls.createCalls.map((call) => (call as { data: { msg_type: string } }).data.msg_type),
+    ).toEqual(['post', 'text'])
+    const postUuid = (calls.createCalls[0] as { data: { uuid: string } }).data.uuid
+    const textUuid = (calls.createCalls[1] as { data: { uuid: string } }).data.uuid
+    expect(typeof postUuid).toBe('string')
+    expect(textUuid).toBe(postUuid)
+    const fallback = calls.createCalls[1] as { data: { content: string } }
+    expect(JSON.parse(fallback.data.content)).toEqual({ text })
+  })
+
+  it('does not text-fallback ambiguous transport failures that may have delivered', async () => {
+    const adapter = new LarkAdapter()
+    const calls = installFakeLarkClient(adapter)
+    ;(adapter as unknown as {
+      client: {
+        im: {
+          message: {
+            create: (args: unknown) => Promise<{ data?: { message_id?: string } }>
+          }
+        }
+      }
+    }).client.im.message.create = async (args: unknown) => {
+      calls.createCalls.push(args)
+      throw Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' })
+    }
+
+    let rejected = false
+    try {
+      await adapter.sendText('oc_1', '### 文件\n- config.json')
+    } catch {
+      rejected = true
+    }
+
+    expect(rejected).toBe(true)
+    expect(calls.createCalls).toHaveLength(1)
+    expect((calls.createCalls[0] as { data: { msg_type: string } }).data.msg_type).toBe('post')
+  })
+
   it('keeps edited progress replies as post messages and renders fenced code blocks', async () => {
     const adapter = new LarkAdapter()
     const calls = installFakeLarkClient(adapter)

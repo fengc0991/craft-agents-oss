@@ -3,8 +3,8 @@
  *
  * Lark/Feishu's `post` rich-text type is a structured JSON format with a
  * subset of formatting (bold, italic, strikethrough, links, code blocks).
- * Headers, lists, and tables have no native equivalents — those fall through
- * as plain text within `text` elements.
+ * Headers, lists, and tables are routed through Lark's Markdown element first;
+ * the adapter falls back to plain `text` if the platform rejects the payload.
  *
  * Returns `{ kind: 'text', text }` when the input has no formatting cues so
  * the adapter can dispatch the lighter `text` message type. Returns

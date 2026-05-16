@@ -135,6 +135,14 @@ describe('formatForLarkPost — block Markdown', () => {
     if (result.kind !== 'post') return
     expect(zhContent(result.post)).toEqual([[{ tag: 'md', text: table }]])
   })
+
+  it('passes Markdown headings and lists through the native md tag', () => {
+    const text = '### Title\n- one\n- two'
+    const result = formatForLarkPost(text)
+    expect(result.kind).toBe('post')
+    if (result.kind !== 'post') return
+    expect(zhContent(result.post)).toEqual([[{ tag: 'md', text }]])
+  })
 })
 
 describe('wrapAsTrivialPost', () => {

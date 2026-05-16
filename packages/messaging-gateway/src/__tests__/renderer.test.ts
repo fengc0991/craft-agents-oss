@@ -271,7 +271,7 @@ describe('Renderer — progress mode (default)', () => {
     expect(edits.map((e) => e.text)).toEqual(['hello world'])
   })
 
-  it('treats Lark progress bindings as a process timeline with one final answer', async () => {
+  it('treats Lark progress bindings as a process timeline and deduplicates identical text', async () => {
     const adapter = makeAdapter({ markdown: 'lark-post' })
     ;(adapter as { platform: 'lark' }).platform = 'lark'
     const binding = makeBinding()
@@ -286,6 +286,7 @@ describe('Renderer — progress mode (default)', () => {
       ev.delta('answer'),
       ev.final('Final: 42'),
       ev.final('Final: 42'),
+      ev.final('Final: 43'),
       ev.complete(),
     ])
 
@@ -293,7 +294,81 @@ describe('Renderer — progress mode (default)', () => {
       { kind: 'sendText', channelId: 'chan-1', text: '🔧 Write File...', messageId: '1' },
       { kind: 'sendText', channelId: 'chan-1', text: 'I checked the context.', messageId: '2' },
       { kind: 'sendText', channelId: 'chan-1', text: 'Final: 42', messageId: '3' },
+      { kind: 'sendText', channelId: 'chan-1', text: 'Final: 43', messageId: '4' },
     ])
+  })
+
+  it('retries a failed Lark final answer when the complete event arrives', async () => {
+    const adapter = makeAdapter({ markdown: 'lark-post' })
+    ;(adapter as { platform: 'lark' }).platform = 'lark'
+    let failFinalOnce = true
+    adapter.sendText = async (channelId: string, text: string): Promise<SentMessage> => {
+      adapter.calls.push({ kind: 'sendText', channelId, text, messageId: `attempt-${adapter.calls.length + 1}` })
+      if (text === 'Final: 42' && failFinalOnce) {
+        failFinalOnce = false
+        throw new Error('send rejected')
+      }
+      return { platform: 'lark', channelId, messageId: `ok-${adapter.calls.length}` }
+    }
+
+    const binding = makeBinding()
+    binding.platform = 'lark'
+
+    let rejected = false
+    try {
+      await renderer.handle(ev.final('Final: 42'), binding, adapter)
+    } catch {
+      rejected = true
+    }
+    expect(rejected).toBe(true)
+
+    await renderer.handle(ev.complete(), binding, adapter)
+
+    expect(
+      adapter.calls.filter((call) => call.kind === 'sendText' && call.text === 'Final: 42'),
+    ).toHaveLength(2)
+  })
+
+  it('serializes adjacent Lark final and complete events so the answer sends once', async () => {
+    const adapter = makeAdapter({ markdown: 'lark-post' })
+    ;(adapter as { platform: 'lark' }).platform = 'lark'
+
+    let releaseFirst!: () => void
+    let markFirstStarted!: () => void
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve
+    })
+    const finishFirst = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    let finalSends = 0
+
+    adapter.sendText = async (channelId: string, text: string): Promise<SentMessage> => {
+      const messageId = `attempt-${adapter.calls.length + 1}`
+      adapter.calls.push({ kind: 'sendText', channelId, text, messageId })
+      if (text === 'Final: 42') {
+        finalSends += 1
+        if (finalSends === 1) {
+          markFirstStarted()
+          await finishFirst
+        }
+      }
+      return { platform: 'lark', channelId, messageId }
+    }
+
+    const binding = makeBinding()
+    binding.platform = 'lark'
+
+    const finalPromise = renderer.handle(ev.final('Final: 42'), binding, adapter)
+    await firstStarted
+    const completePromise = renderer.handle(ev.complete(), binding, adapter)
+
+    releaseFirst()
+    await Promise.all([finalPromise, completePromise])
+
+    expect(
+      adapter.calls.filter((call) => call.kind === 'sendText' && call.text === 'Final: 42'),
+    ).toHaveLength(1)
   })
 
   it('drops intermediate text — never appears in any message', async () => {
