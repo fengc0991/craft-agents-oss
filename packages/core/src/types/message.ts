@@ -78,6 +78,16 @@ export interface MessageAttachment {
 }
 
 /**
+ * Metadata for assistant-generated file messages.
+ */
+export interface GeneratedFileReference {
+  path: string;
+  name: string;
+  size?: number;
+  mimeType?: string;
+}
+
+/**
  * Content badge for inline display in user messages
  * Badges are self-contained with all display data (label, icon)
  */
@@ -273,6 +283,8 @@ export interface Message {
   isBackground?: boolean;   // Flag for UI differentiation
   // Stored attachments for user messages (persistent, no base64)
   attachments?: StoredAttachment[];
+  // Assistant-generated file metadata for previewable file cards
+  generatedFile?: GeneratedFileReference;
   // Content badges for inline display (sources, skills)
   badges?: ContentBadge[];
   /** Annotation payloads for this message */
@@ -361,6 +373,8 @@ export interface StoredMessage {
   isError?: boolean;
   /** Stored attachments for user messages (persisted to disk) */
   attachments?: StoredAttachment[];
+  /** Assistant-generated file metadata (persisted for file-card rendering) */
+  generatedFile?: GeneratedFileReference;
   /** Content badges for inline display (sources, skills) */
   badges?: ContentBadge[];
   /** Annotations persisted at message level */

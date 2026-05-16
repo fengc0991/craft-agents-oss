@@ -23,6 +23,34 @@ describe('resolveMarkdownLinkTarget', () => {
     })
   })
 
+  it('resolves unicode workspace-relative file paths as file targets', () => {
+    expect(resolveMarkdownLinkTarget('data/登鹳雀楼.md')).toEqual({
+      kind: 'file',
+      path: 'data/登鹳雀楼.md',
+    })
+  })
+
+  it('decodes percent-encoded relative file paths before opening previews', () => {
+    expect(resolveMarkdownLinkTarget('%E7%99%BB%E9%B9%B3%E9%9B%80%E6%A5%BC.md')).toEqual({
+      kind: 'file',
+      path: '登鹳雀楼.md',
+    })
+  })
+
+  it('decodes percent-encoded nested file paths before opening previews', () => {
+    expect(resolveMarkdownLinkTarget('data/%E7%99%BB%E9%B9%B3%E9%9B%80%E6%A5%BC.md')).toEqual({
+      kind: 'file',
+      path: 'data/登鹳雀楼.md',
+    })
+  })
+
+  it('decodes percent-encoded relative file paths with spaces', () => {
+    expect(resolveMarkdownLinkTarget('report%20final.pdf')).toEqual({
+      kind: 'file',
+      path: 'report final.pdf',
+    })
+  })
+
   it('resolves unix file URLs as file targets', () => {
     expect(resolveMarkdownLinkTarget('file:///Users/tester/report.xlsx')).toEqual({
       kind: 'file',

@@ -29,6 +29,7 @@ import {
   handleNameChanged,
   handlePermissionRequest,
   handleCredentialRequest,
+  handleFileGenerated,
   handlePlanSubmitted,
   handleStatus,
   handleInfo,
@@ -73,6 +74,9 @@ export function processEvent(
       const newState = handleTextComplete(state, event)
       return { state: newState, effects: [] }
     }
+
+    case 'file_generated':
+      return handleFileGenerated(state, event)
 
     case 'tool_start': {
       const newState = handleToolStart(state, event)

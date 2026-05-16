@@ -21,6 +21,7 @@ import type {
   NameChangedEvent,
   PermissionRequestEvent,
   CredentialRequestEvent,
+  FileGeneratedEvent,
   PlanSubmittedEvent,
   StatusEvent,
   InfoEvent,
@@ -279,6 +280,23 @@ export function handleInfo(
     state: {
       session: appendMessage(session, infoMessage),
       streaming,
+    },
+    effects: [],
+  }
+}
+
+/**
+ * Handle generated file - append the backend-authored file message as its own
+ * assistant bubble.
+ */
+export function handleFileGenerated(
+  state: SessionState,
+  event: FileGeneratedEvent
+): ProcessResult {
+  return {
+    state: {
+      session: appendMessage(state.session, event.message, true),
+      streaming: state.streaming,
     },
     effects: [],
   }
@@ -946,4 +964,3 @@ export function handleUsageUpdate(
     effects: [],
   }
 }
-

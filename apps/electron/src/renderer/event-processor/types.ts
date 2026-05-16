@@ -51,6 +51,19 @@ export interface TextCompleteEvent {
 }
 
 /**
+ * File generated event - appends a standalone assistant message for one file.
+ */
+export interface FileGeneratedEvent {
+  type: 'file_generated'
+  sessionId: string
+  filePath: string
+  fileName: string
+  size?: number
+  mimeType?: string
+  message: Message
+}
+
+/**
  * Tool start event - begins tool execution
  * Field names match SessionEvent from shared/types.ts
  */
@@ -475,6 +488,7 @@ export interface UsageUpdateEvent {
 export type AgentEvent =
   | TextDeltaEvent
   | TextCompleteEvent
+  | FileGeneratedEvent
   | ToolStartEvent
   | ToolResultEvent
   | CompleteEvent

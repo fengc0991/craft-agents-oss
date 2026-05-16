@@ -10,7 +10,7 @@
  * via manual smoke against a real Lark Custom App.
  */
 import { describe, expect, it } from 'bun:test'
-import { parseLarkCredentials, LarkAdapter } from '../adapters/lark/index'
+import { parseLarkCredentials, LarkAdapter, type LarkCredentials } from '../adapters/lark/index'
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void
@@ -25,11 +25,15 @@ function installFakeLarkClient(adapter: LarkAdapter): {
   updateCalls: unknown[]
   patchCalls: unknown[]
   reactionCalls: unknown[]
+  fileCalls: unknown[]
+  imageCalls: unknown[]
 } {
   const createCalls: unknown[] = []
   const updateCalls: unknown[] = []
   const patchCalls: unknown[] = []
   const reactionCalls: unknown[] = []
+  const fileCalls: unknown[] = []
+  const imageCalls: unknown[] = []
   ;(adapter as unknown as { client: unknown }).client = {
     im: {
       v1: {
@@ -55,14 +59,47 @@ function installFakeLarkClient(adapter: LarkAdapter): {
         },
       },
       file: {
-        create: async () => ({ file_key: 'file_1' }),
+        create: async (args: unknown) => {
+          fileCalls.push(args)
+          return { data: { file_key: 'file_1' } }
+        },
       },
       image: {
-        create: async () => ({ image_key: 'img_1' }),
+        create: async (args: unknown) => {
+          imageCalls.push(args)
+          return { data: { image_key: 'img_1' } }
+        },
       },
     },
   }
-  return { createCalls, updateCalls, patchCalls, reactionCalls }
+  return { createCalls, updateCalls, patchCalls, reactionCalls, fileCalls, imageCalls }
+}
+
+function installFakeLarkUploads(adapter: LarkAdapter): {
+  fileUploadCalls: Array<{ file: Buffer; filename: string }>
+  imageUploadCalls: Array<{ file: Buffer; filename: string }>
+} {
+  const fileUploadCalls: Array<{ file: Buffer; filename: string }> = []
+  const imageUploadCalls: Array<{ file: Buffer; filename: string }> = []
+  ;(
+    adapter as unknown as {
+      uploadLarkFileWithFetch: (file: Buffer, filename: string) => Promise<string>
+      uploadLarkImageWithFetch: (file: Buffer, filename: string) => Promise<string>
+    }
+  ).uploadLarkFileWithFetch = async (file, filename) => {
+    fileUploadCalls.push({ file, filename })
+    return 'file_1'
+  }
+  ;(
+    adapter as unknown as {
+      uploadLarkFileWithFetch: (file: Buffer, filename: string) => Promise<string>
+      uploadLarkImageWithFetch: (file: Buffer, filename: string) => Promise<string>
+    }
+  ).uploadLarkImageWithFetch = async (file, filename) => {
+    imageUploadCalls.push({ file, filename })
+    return 'img_1'
+  }
+  return { fileUploadCalls, imageUploadCalls }
 }
 
 describe('parseLarkCredentials', () => {
@@ -156,6 +193,102 @@ describe('LarkAdapter — static contract', () => {
     expect(JSON.parse(update.data.content)).toEqual({
       zh_cn: { content: [[{ tag: 'code_block', language: 'text', text: 'hello world' }]] },
     })
+  })
+
+  it('sends non-image attachments as native Lark file messages', async () => {
+    const adapter = new LarkAdapter()
+    const calls = installFakeLarkClient(adapter)
+    const uploads = installFakeLarkUploads(adapter)
+
+    await adapter.sendFile('oc_1', Buffer.from('# poem'), '静夜思.md')
+
+    expect(uploads.fileUploadCalls).toEqual([{ file: Buffer.from('# poem'), filename: '静夜思.md' }])
+    expect(uploads.imageUploadCalls).toEqual([])
+
+    const create = calls.createCalls[0] as {
+      data: { msg_type: string; content: string }
+    }
+    expect(create.data.msg_type).toBe('file')
+    expect(JSON.parse(create.data.content)).toEqual({ file_key: 'file_1' })
+  })
+
+  it('uploads generated files through Feishu multipart OpenAPI', async () => {
+    const adapter = new LarkAdapter()
+    const internals = adapter as unknown as {
+      credentials: LarkCredentials | null
+      apiBaseUrl: string
+      tenantAccessTokenCache: { token: string; expiresAt: number } | null
+      uploadLarkFileWithFetch(file: Buffer, filename: string): Promise<string>
+    }
+    internals.credentials = { appId: 'cli_1', appSecret: 'secret_1', domain: 'feishu' }
+    internals.apiBaseUrl = 'https://open.feishu.cn'
+    internals.tenantAccessTokenCache = null
+
+    const originalFetch = globalThis.fetch
+    const fetchCalls: Array<{
+      input: Parameters<typeof fetch>[0]
+      init: Parameters<typeof fetch>[1]
+    }> = []
+    globalThis.fetch = (async (input, init) => {
+      fetchCalls.push({ input, init })
+      const url = String(input)
+      if (url.endsWith('/open-apis/auth/v3/tenant_access_token/internal')) {
+        return new Response(
+          JSON.stringify({ code: 0, tenant_access_token: 'tenant_token_1', expire: 7200 }),
+          { status: 200 },
+        )
+      }
+      if (url.endsWith('/open-apis/im/v1/files')) {
+        return new Response(JSON.stringify({ code: 0, data: { file_key: 'file_fetch_1' } }), {
+          status: 200,
+        })
+      }
+      return new Response(JSON.stringify({ code: 404, msg: 'unexpected test URL' }), { status: 404 })
+    }) as typeof fetch
+
+    try {
+      const key = await internals.uploadLarkFileWithFetch(Buffer.from('# poem'), '春晓.md')
+      expect(key).toBe('file_fetch_1')
+
+      expect(String(fetchCalls[0]?.input)).toBe(
+        'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
+      )
+      expect(fetchCalls[0]?.init?.method).toBe('POST')
+      expect(JSON.parse(String(fetchCalls[0]?.init?.body))).toEqual({
+        app_id: 'cli_1',
+        app_secret: 'secret_1',
+      })
+
+      expect(String(fetchCalls[1]?.input)).toBe('https://open.feishu.cn/open-apis/im/v1/files')
+      expect(fetchCalls[1]?.init?.method).toBe('POST')
+      expect(fetchCalls[1]?.init?.headers).toEqual({ Authorization: 'Bearer tenant_token_1' })
+
+      const form = fetchCalls[1]?.init?.body as FormData
+      expect(form.get('file_type')).toBe('stream')
+      expect(form.get('file_name')).toBe('春晓.md')
+      const filePart = form.get('file') as { name?: string; size?: number } | null
+      expect(filePart?.name).toBe('春晓.md')
+      expect(filePart?.size).toBe(Buffer.byteLength('# poem'))
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('sends images as native Lark image messages', async () => {
+    const adapter = new LarkAdapter()
+    const calls = installFakeLarkClient(adapter)
+    const uploads = installFakeLarkUploads(adapter)
+
+    await adapter.sendFile('oc_1', Buffer.from('png'), 'cover.png')
+
+    expect(uploads.imageUploadCalls).toEqual([{ file: Buffer.from('png'), filename: 'cover.png' }])
+    expect(uploads.fileUploadCalls).toEqual([])
+
+    const create = calls.createCalls[0] as {
+      data: { msg_type: string; content: string }
+    }
+    expect(create.data.msg_type).toBe('image')
+    expect(JSON.parse(create.data.content)).toEqual({ image_key: 'img_1' })
   })
 
   it('adds an OK reaction to inbound text messages as an immediate ack', async () => {

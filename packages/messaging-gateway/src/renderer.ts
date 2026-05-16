@@ -33,6 +33,8 @@ import type {
   InlineButton,
   ResponseMode,
 } from './types'
+import { readFile } from 'node:fs/promises'
+import { basename } from 'node:path'
 
 /**
  * Build the per-call options bag from a binding. Currently only `threadId`
@@ -176,6 +178,10 @@ export class Renderer {
     }
     if (event.type === 'plan_submitted') {
       await this.handlePlanSubmitted(event, binding, adapter)
+      return
+    }
+    if (event.type === 'file_generated') {
+      await this.handleFileGenerated(event, binding, adapter)
       return
     }
     if (event.type === 'error' || event.type === 'typed_error') {
@@ -597,6 +603,30 @@ Approve in the desktop app to continue.`,
         `📝 A plan is ready for review (couldn't render inline: ${
           err instanceof Error ? err.message : 'unknown error'
         }). Open the desktop app to approve it.`,
+        bindingOpts(binding),
+      )
+    }
+  }
+
+  private async handleFileGenerated(
+    event: SessionEvent,
+    binding: ChannelBinding,
+    adapter: PlatformAdapter,
+  ): Promise<void> {
+    const filePath = typeof event.filePath === 'string' ? event.filePath : ''
+    if (!filePath) return
+
+    const fileName = typeof event.fileName === 'string' && event.fileName.length > 0
+      ? event.fileName
+      : basename(filePath)
+
+    try {
+      const file = await readFile(filePath)
+      await adapter.sendFile(binding.channelId, file, fileName, undefined, bindingOpts(binding))
+    } catch {
+      await adapter.sendText(
+        binding.channelId,
+        `Generated file: ${fileName}\n${filePath}`,
         bindingOpts(binding),
       )
     }

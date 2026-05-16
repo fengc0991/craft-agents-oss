@@ -8,6 +8,14 @@ function normalizeFileUrlPath(path: string): string {
   return /^\/[A-Za-z]:\//.test(path) ? path.slice(1) : path
 }
 
+function decodeFilePathTarget(target: string): string {
+  try {
+    return decodeURIComponent(target)
+  } catch {
+    return target
+  }
+}
+
 function resolveFileUrlPath(target: string): string | null {
   if (!/^file:/i.test(target)) return null
 
@@ -42,6 +50,15 @@ export function resolveMarkdownLinkTarget(target: string): ResolvedMarkdownLinkT
   const fileUrlPath = resolveFileUrlPath(trimmed)
   if (fileUrlPath) {
     return { kind: 'file', path: fileUrlPath }
+  }
+
+  const decodedFilePath = decodeFilePathTarget(trimmed)
+  if (isFilePathTarget(decodedFilePath)) {
+    return { kind: 'file', path: decodedFilePath }
+  }
+
+  if (decodedFilePath !== trimmed && isFilePathTarget(trimmed)) {
+    return { kind: 'file', path: decodedFilePath }
   }
 
   if (isFilePathTarget(trimmed)) {

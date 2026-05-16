@@ -12,6 +12,9 @@
  */
 
 import { describe, expect, it, beforeEach } from 'bun:test'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Renderer, type SessionEvent } from '../renderer'
 import {
   DEFAULT_BINDING_CONFIG,
@@ -28,10 +31,12 @@ import {
 // ---------------------------------------------------------------------------
 
 interface Call {
-  kind: 'sendText' | 'editMessage' | 'sendButtons' | 'sendTyping'
+  kind: 'sendText' | 'editMessage' | 'sendButtons' | 'sendTyping' | 'sendFile'
   channelId: string
   messageId?: string
   text?: string
+  fileName?: string
+  fileSize?: number
 }
 
 function makeAdapter(
@@ -77,8 +82,9 @@ function makeAdapter(
     async sendTyping(channelId: string): Promise<void> {
       calls.push({ kind: 'sendTyping', channelId })
     },
-    async sendFile(channelId: string): Promise<SentMessage> {
+    async sendFile(channelId: string, file: Buffer, filename: string): Promise<SentMessage> {
       const messageId = String(nextId++)
+      calls.push({ kind: 'sendFile', channelId, fileName: filename, fileSize: file.byteLength, messageId })
       return { platform: 'telegram', channelId, messageId }
     },
   }
@@ -152,6 +158,49 @@ const ev = {
   }),
   complete: (): SessionEvent => ({ type: 'complete', sessionId: 's' }),
 }
+
+// ---------------------------------------------------------------------------
+// generated files
+// ---------------------------------------------------------------------------
+
+describe('Renderer — generated files', () => {
+  it('sends file_generated as a standalone file message', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'craft-renderer-file-'))
+    try {
+      const filePath = join(tempDir, '登鹳雀楼.md')
+      await writeFile(filePath, 'poem')
+
+      const renderer = new Renderer()
+      const adapter = makeAdapter()
+      const binding = makeBinding()
+
+      await renderer.handle({
+        type: 'file_generated',
+        sessionId: 's',
+        filePath,
+        fileName: '登鹳雀楼.md',
+        message: {
+          id: 'm-file',
+          role: 'assistant',
+          content: 'Generated file',
+          timestamp: Date.now(),
+        },
+      }, binding, adapter)
+
+      expect(adapter.calls.filter((call) => call.kind === 'sendFile')).toEqual([
+        {
+          kind: 'sendFile',
+          channelId: 'chan-1',
+          messageId: '1',
+          fileName: '登鹳雀楼.md',
+          fileSize: 4,
+        },
+      ])
+    } finally {
+      await rm(tempDir, { recursive: true, force: true })
+    }
+  })
+})
 
 // ---------------------------------------------------------------------------
 // progress mode (default)

@@ -2,10 +2,11 @@ import type { EventSink } from '@craft-agent/server-core/transport'
 import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput } from '@craft-agent/server-core/handlers'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-core/handlers'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@craft-agent/server-core/runtime'
-import { basename, dirname, join } from 'path'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'path'
 import { existsSync } from 'fs'
-import { readFile, writeFile, mkdir } from 'fs/promises'
+import { copyFile, readFile, writeFile, mkdir, stat } from 'fs/promises'
 import { randomUUID } from 'node:crypto'
+import { pathToFileURL } from 'node:url'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary } from '@craft-agent/shared/agent'
 import {
   resolveSessionConnection,
@@ -168,6 +169,44 @@ export const AGENT_FLAGS = {
 const MAX_ADMIN_REMEMBER_MINUTES = 60
 const MAX_ANNOTATIONS_PER_MESSAGE = 200
 const MAX_ANNOTATION_JSON_BYTES = 32 * 1024
+const MAX_GENERATED_ARTIFACT_BYTES = 50 * 1024 * 1024
+
+const GENERATED_ARTIFACT_EXTENSIONS = new Set([
+  '.csv',
+  '.docx',
+  '.gif',
+  '.htm',
+  '.html',
+  '.jpeg',
+  '.jpg',
+  '.json',
+  '.md',
+  '.pdf',
+  '.png',
+  '.pptx',
+  '.svg',
+  '.tsv',
+  '.txt',
+  '.webp',
+  '.xlsx',
+  '.yaml',
+  '.yml',
+])
+
+const WORKSPACE_SYSTEM_ROOTS = new Set([
+  'labels',
+  'permissions',
+  'sessions',
+  'skills',
+  'sources',
+  'statuses',
+])
+
+const WORKSPACE_SYSTEM_FILES = new Set([
+  'permissions.json',
+  'theme.json',
+  'workspace.json',
+])
 
 // Window during which fs.watch metadata-revert events from our own atomic write
 // are ignored, so the watcher does not roll back the in-memory mutation we
@@ -697,6 +736,15 @@ async function resolveToolDisplayMeta(
 /** Agent type - unified backend interface for all providers */
 type AgentInstance = AgentBackend
 
+interface GeneratedFileArtifact {
+  sourcePath: string
+  filePath: string
+  fileName: string
+  size?: number
+  mimeType?: string
+  createdAt: number
+}
+
 interface ManagedSession {
   id: string
   workspace: Workspace
@@ -870,6 +918,11 @@ interface ManagedSession {
   // Whether the previous turn was interrupted (for context injection on next message).
   // Ephemeral — not persisted to disk. Cleared after one-shot injection.
   wasInterrupted?: boolean
+  // File artifacts created during the current turn. Flushed as separate messages
+  // once the run stops, so desktop and messaging bindings both receive files.
+  generatedArtifacts?: Map<string, GeneratedFileArtifact>
+  // Tool result IDs already materialized as artifacts; avoids duplicate SDK result replays.
+  generatedArtifactToolUseIds?: Set<string>
 }
 
 /**
@@ -914,6 +967,8 @@ export function createManagedSession(
     messageQueue: [],
     backgroundShellCommands: new Map(),
     backgroundTaskOutputs: new Map(),
+    generatedArtifacts: new Map(),
+    generatedArtifactToolUseIds: new Set(),
     messagesLoaded: false,
     tokenRefreshManager: new TokenRefreshManager(getSourceCredentialManager(), {
       log: (msg) => sessionLog.debug(msg),
@@ -5235,6 +5290,9 @@ export class SessionManager implements ISessionManager {
       return
     }
 
+    managed.generatedArtifacts = new Map()
+    managed.generatedArtifactToolUseIds = new Set()
+
     // Add user message with stored attachments for persistence
     // Skip if existingMessageId is provided (message was already created when queued)
     let userMessage: Message
@@ -5890,6 +5948,281 @@ export class SessionManager implements ISessionManager {
     return true
   }
 
+  private async recordGeneratedFileArtifact(
+    managed: ManagedSession,
+    event: Extract<AgentEvent, { type: 'tool_result' }>,
+    fallbackInput?: Record<string, unknown>,
+  ): Promise<void> {
+    const toolName = (event.toolName ?? '').toLowerCase()
+    if (toolName !== 'write' && toolName !== 'bash') return
+    managed.generatedArtifactToolUseIds ??= new Set()
+    if (managed.generatedArtifactToolUseIds.has(event.toolUseId)) return
+
+    const input = event.input ?? fallbackInput
+    const requestedPath = toolName === 'bash'
+      ? this.extractBashGeneratedFilePath(input)
+      : this.extractGeneratedFileRequestedPath(input)
+    if (!requestedPath) return
+
+    try {
+      const sourcePath = await this.resolveGeneratedFileSourcePath(managed, requestedPath)
+      if (!sourcePath || !this.isGeneratedArtifactPath(sourcePath)) return
+      if (this.isSessionInternalNonArtifactPath(managed, sourcePath)) return
+
+      const sourceStat = await stat(sourcePath)
+      if (!sourceStat.isFile() || sourceStat.size > MAX_GENERATED_ARTIFACT_BYTES) return
+
+      const filePath = await this.materializeGeneratedArtifact(managed, sourcePath, requestedPath)
+      if (!filePath) return
+
+      const finalStat = filePath === sourcePath ? sourceStat : await stat(filePath)
+      managed.generatedArtifacts ??= new Map()
+      managed.generatedArtifacts.set(filePath, {
+        sourcePath,
+        filePath,
+        fileName: basename(filePath),
+        size: finalStat.size,
+        mimeType: this.mimeTypeForArtifact(filePath),
+        createdAt: Date.now(),
+      })
+      managed.generatedArtifactToolUseIds.add(event.toolUseId)
+    } catch (error) {
+      sessionLog.warn(`Failed to record generated artifact for session ${managed.id}:`, error)
+    }
+  }
+
+  private extractGeneratedFileRequestedPath(input?: Record<string, unknown>): string | undefined {
+    const value = input?.file_path ?? input?.path
+    if (typeof value !== 'string') return undefined
+    const trimmed = value.trim()
+    return trimmed.length > 0 ? trimmed : undefined
+  }
+
+  private extractBashGeneratedFilePath(input?: Record<string, unknown>): string | undefined {
+    const command = input?.command
+    if (typeof command !== 'string') return undefined
+
+    const redirectionPattern = /(?:^|[\s;&|])(?:\d*)>{1,2}\s*(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/g
+    let match: RegExpExecArray | null
+    let target: string | undefined
+    let fallbackTarget: string | undefined
+
+    while ((match = redirectionPattern.exec(command)) !== null) {
+      const candidate = match[1] ?? match[2] ?? match[3]
+      if (!candidate) continue
+      fallbackTarget = candidate
+      if (this.isGeneratedArtifactPath(candidate)) {
+        target = candidate
+      }
+    }
+
+    return target?.trim() || fallbackTarget?.trim() || undefined
+  }
+
+  private async resolveGeneratedFileSourcePath(
+    managed: ManagedSession,
+    requestedPath: string,
+  ): Promise<string | undefined> {
+    const candidates: string[] = []
+    const sessionPath = getSessionStoragePath(managed.workspace.rootPath, managed.id)
+
+    if (requestedPath.startsWith('~/')) {
+      const home = process.env.HOME
+      if (home) candidates.push(resolve(home, requestedPath.slice(2)))
+    } else if (isAbsolute(requestedPath)) {
+      candidates.push(requestedPath)
+    } else {
+      const bases = [
+        managed.workingDirectory,
+        managed.sdkCwd,
+        sessionPath,
+        managed.workspace.rootPath,
+      ].filter((base): base is string => typeof base === 'string' && base.length > 0)
+
+      for (const base of bases) {
+        candidates.push(resolve(base, requestedPath))
+      }
+    }
+
+    for (const candidate of Array.from(new Set(candidates))) {
+      try {
+        const candidateStat = await stat(candidate)
+        if (candidateStat.isFile()) return resolve(candidate)
+      } catch {
+        // Try the next plausible cwd.
+      }
+    }
+
+    return undefined
+  }
+
+  private isGeneratedArtifactPath(filePath: string): boolean {
+    return GENERATED_ARTIFACT_EXTENSIONS.has(extname(filePath).toLowerCase())
+  }
+
+  private isSessionInternalNonArtifactPath(managed: ManagedSession, filePath: string): boolean {
+    const sessionPath = getSessionStoragePath(managed.workspace.rootPath, managed.id)
+    if (!this.isInsidePath(sessionPath, filePath)) return false
+
+    const firstSegment = relative(sessionPath, filePath).split(/[\\/]+/)[0]
+    return firstSegment === 'plans' || firstSegment === 'meta' || firstSegment === 'attachments'
+  }
+
+  private async materializeGeneratedArtifact(
+    managed: ManagedSession,
+    sourcePath: string,
+    requestedPath: string,
+  ): Promise<string | undefined> {
+    const workspaceRoot = resolve(managed.workspace.rootPath)
+    const sourceResolved = resolve(sourcePath)
+    const sourceRelativeToWorkspace = relative(workspaceRoot, sourceResolved)
+
+    if (this.isInsidePath(workspaceRoot, sourceResolved) && sourceRelativeToWorkspace) {
+      const firstSegment = sourceRelativeToWorkspace.split(/[\\/]+/)[0]
+      const isTopLevelSystemFile = !sourceRelativeToWorkspace.includes('/') && WORKSPACE_SYSTEM_FILES.has(sourceRelativeToWorkspace)
+      if (firstSegment && !WORKSPACE_SYSTEM_ROOTS.has(firstSegment) && !isTopLevelSystemFile) {
+        return sourceResolved
+      }
+      if (firstSegment && firstSegment !== 'sessions') {
+        return undefined
+      }
+    }
+
+    const targetRelativePath = this.resolveArtifactTargetRelativePath(managed, sourceResolved, requestedPath)
+    if (!targetRelativePath) return undefined
+
+    const targetPath = await this.getAvailableArtifactPath(resolve(workspaceRoot, targetRelativePath))
+    await mkdir(dirname(targetPath), { recursive: true })
+    await copyFile(sourceResolved, targetPath)
+    return targetPath
+  }
+
+  private resolveArtifactTargetRelativePath(
+    managed: ManagedSession,
+    sourcePath: string,
+    requestedPath: string,
+  ): string | undefined {
+    const requestedRelative = this.normalizeArtifactRelativePath(requestedPath)
+    if (requestedRelative) return requestedRelative
+
+    const sessionPath = getSessionStoragePath(managed.workspace.rootPath, managed.id)
+    if (this.isInsidePath(sessionPath, sourcePath)) {
+      const sourceRelativeToSession = this.normalizeArtifactRelativePath(relative(sessionPath, sourcePath))
+      if (sourceRelativeToSession) return sourceRelativeToSession
+    }
+
+    return this.normalizeArtifactRelativePath(basename(sourcePath))
+  }
+
+  private normalizeArtifactRelativePath(value: string): string | undefined {
+    const trimmed = value.trim()
+    if (!trimmed || isAbsolute(trimmed) || /^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return undefined
+
+    const parts: string[] = []
+    for (const part of trimmed.split(/[\\/]+/)) {
+      if (!part || part === '.') continue
+      if (part === '..') return undefined
+      parts.push(part)
+    }
+
+    if (parts.length === 0) return undefined
+    if (WORKSPACE_SYSTEM_ROOTS.has(parts[0]!) || WORKSPACE_SYSTEM_FILES.has(parts.join('/'))) return undefined
+    return parts.join('/')
+  }
+
+  private isInsidePath(parentPath: string, candidatePath: string): boolean {
+    const rel = relative(resolve(parentPath), resolve(candidatePath))
+    return rel === '' || (!!rel && !rel.startsWith('..') && !isAbsolute(rel))
+  }
+
+  private async getAvailableArtifactPath(initialPath: string): Promise<string> {
+    if (!existsSync(initialPath)) return initialPath
+
+    const dir = dirname(initialPath)
+    const ext = extname(initialPath)
+    const stem = basename(initialPath, ext)
+
+    for (let i = 2; i < 1000; i++) {
+      const candidate = join(dir, `${stem}-${i}${ext}`)
+      if (!existsSync(candidate)) return candidate
+    }
+
+    return join(dir, `${stem}-${Date.now()}${ext}`)
+  }
+
+  private async flushGeneratedFileArtifacts(managed: ManagedSession): Promise<void> {
+    const artifacts = Array.from(managed.generatedArtifacts?.values() ?? [])
+      .sort((a, b) => a.createdAt - b.createdAt)
+
+    managed.generatedArtifacts?.clear()
+    if (artifacts.length === 0) return
+
+    for (const artifact of artifacts) {
+      try {
+        const fileStat = await stat(artifact.filePath)
+        if (!fileStat.isFile()) continue
+
+        const message: Message = {
+          id: generateMessageId(),
+          role: 'assistant',
+          content: `Generated file: [${this.escapeMarkdownLinkText(artifact.fileName)}](${pathToFileURL(artifact.filePath).href})`,
+          timestamp: this.monotonic(),
+          generatedFile: {
+            path: artifact.filePath,
+            name: artifact.fileName,
+            size: artifact.size ?? fileStat.size,
+            mimeType: artifact.mimeType ?? this.mimeTypeForArtifact(artifact.filePath),
+          },
+        }
+
+        managed.messages.push(message)
+        managed.lastMessageRole = 'assistant'
+        managed.lastFinalMessageId = message.id
+
+        this.sendEvent({
+          type: 'file_generated',
+          sessionId: managed.id,
+          filePath: artifact.filePath,
+          fileName: artifact.fileName,
+          size: artifact.size ?? fileStat.size,
+          mimeType: artifact.mimeType ?? this.mimeTypeForArtifact(artifact.filePath),
+          message,
+        }, managed.workspace.id)
+      } catch (error) {
+        sessionLog.warn(`Failed to flush generated artifact for session ${managed.id}:`, error)
+      }
+    }
+  }
+
+  private escapeMarkdownLinkText(text: string): string {
+    return text.replace(/\\/g, '\\\\').replace(/\]/g, '\\]')
+  }
+
+  private mimeTypeForArtifact(filePath: string): string | undefined {
+    switch (extname(filePath).toLowerCase()) {
+      case '.csv': return 'text/csv'
+      case '.docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      case '.gif': return 'image/gif'
+      case '.htm':
+      case '.html': return 'text/html'
+      case '.jpeg':
+      case '.jpg': return 'image/jpeg'
+      case '.json': return 'application/json'
+      case '.md': return 'text/markdown'
+      case '.pdf': return 'application/pdf'
+      case '.png': return 'image/png'
+      case '.pptx': return 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+      case '.svg': return 'image/svg+xml'
+      case '.tsv': return 'text/tab-separated-values'
+      case '.txt': return 'text/plain'
+      case '.webp': return 'image/webp'
+      case '.xlsx': return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      case '.yaml':
+      case '.yml': return 'application/yaml'
+      default: return undefined
+    }
+  }
+
   /**
    * Central handler for when processing stops (any reason).
    * Single source of truth for cleanup and queue processing.
@@ -5912,6 +6245,13 @@ export class SessionManager implements ISessionManager {
 
     const turnStartFinalMessageId = managed.turnStartFinalMessageId
     managed.turnStartFinalMessageId = undefined
+
+    if (reason === 'complete') {
+      await this.flushGeneratedFileArtifacts(managed)
+    } else {
+      managed.generatedArtifacts?.clear()
+    }
+    managed.generatedArtifactToolUseIds?.clear()
 
     // Clear agent control overlay between turns. The session keeps browser
     // ownership (boundSessionId) — only the visual overlay is removed.
@@ -6790,6 +7130,10 @@ export class SessionManager implements ISessionManager {
               parentToolUseId: event.toolUseId,
             }, workspaceId)
           }
+        }
+
+        if (!inferredError) {
+          await this.recordGeneratedFileArtifact(managed, event, existingToolMsg?.toolInput)
         }
 
         // Persist session after tool completes to prevent data loss on quit

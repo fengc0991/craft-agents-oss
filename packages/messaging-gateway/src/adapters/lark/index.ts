@@ -25,6 +25,7 @@ import type {
   InlineButton,
   ButtonPress,
   MessagingLogger,
+  MessagingLogMeta,
   SendOptions,
 } from '../../types'
 import {
@@ -46,6 +47,8 @@ import {
  * we fail fast in the adapter with a user-visible reply.
  */
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+const LARK_MAX_UPLOAD_FILE_BYTES = 30 * 1024 * 1024
+const LARK_MAX_UPLOAD_IMAGE_BYTES = 10 * 1024 * 1024
 const ACK_REACTION_EMOJI = 'OK'
 const ACKED_MESSAGE_MAX = 2000
 
@@ -110,6 +113,67 @@ function resolveLarkDomain(domain: 'lark' | 'feishu'): lark.Domain {
   return domain === 'feishu' ? lark.Domain.Feishu : lark.Domain.Lark
 }
 
+function resolveLarkApiBaseUrl(domain: 'lark' | 'feishu'): string {
+  return domain === 'feishu' ? 'https://open.feishu.cn' : 'https://open.larksuite.com'
+}
+
+type LarkUploadFileType = 'opus' | 'mp4' | 'pdf' | 'doc' | 'xls' | 'ppt' | 'stream'
+
+function resolveLarkFileType(filename: string): LarkUploadFileType {
+  switch (extname(filename).toLowerCase()) {
+    case '.opus':
+      return 'opus'
+    case '.mp4':
+      return 'mp4'
+    case '.pdf':
+      return 'pdf'
+    case '.doc':
+    case '.docx':
+      return 'doc'
+    case '.xls':
+    case '.xlsx':
+      return 'xls'
+    case '.ppt':
+    case '.pptx':
+      return 'ppt'
+    default:
+      return 'stream'
+  }
+}
+
+interface LarkApiEnvelope<TData extends object = Record<string, unknown>> {
+  code?: number
+  msg?: string
+  data?: TData
+  tenant_access_token?: string
+  expire?: number
+}
+
+function extractLarkErrorMeta(err: unknown): MessagingLogMeta {
+  const meta: MessagingLogMeta = {
+    error: err instanceof Error ? err.message : String(err),
+  }
+  const errObj = (err ?? {}) as {
+    code?: unknown
+    msg?: unknown
+    response?: { status?: unknown; data?: unknown }
+    cause?: unknown
+  }
+  if (typeof errObj.code === 'number' || typeof errObj.code === 'string') meta.code = errObj.code
+  if (typeof errObj.msg === 'string') meta.msg = errObj.msg
+  if (typeof errObj.response?.status === 'number') meta.httpStatus = errObj.response.status
+
+  const responseData = errObj.response?.data
+  if (responseData && typeof responseData === 'object') {
+    const data = responseData as { code?: unknown; msg?: unknown; error?: unknown }
+    if (typeof data.code === 'number' || typeof data.code === 'string') meta.larkCode = data.code
+    if (typeof data.msg === 'string') meta.larkMsg = data.msg
+    if (data.error !== undefined) meta.larkError = data.error
+  }
+  if (errObj.cause instanceof Error) meta.cause = errObj.cause.message
+  return meta
+}
+
 /**
  * Strip a leading `<at user_id="...">…</at> ` prefix from a Lark text message
  * content. Lark prepends the @mention as a literal in the content, but the
@@ -151,13 +215,13 @@ interface LarkClient {
     }
     file: {
       create: (args: {
-        data: { file_type: string; file_name: string; file: Buffer }
-      }) => Promise<{ file_key?: string } | null>
+        data: { file_type: 'opus' | 'mp4' | 'pdf' | 'doc' | 'xls' | 'ppt' | 'stream'; file_name: string; file: Buffer }
+      }) => Promise<{ file_key?: string; data?: { file_key?: string } } | null>
     }
     image: {
       create: (args: {
         data: { image_type: 'message' | 'avatar'; image: Buffer }
-      }) => Promise<{ image_key?: string } | null>
+      }) => Promise<{ image_key?: string; data?: { image_key?: string } } | null>
     }
   }
 }
@@ -223,6 +287,9 @@ export class LarkAdapter implements PlatformAdapter {
   private log: MessagingLogger = NOOP_LOGGER
   private postLocale: LarkPostLocaleKey = 'zh_cn'
   private ackedInboundMessages = new Set<string>()
+  private credentials: LarkCredentials | null = null
+  private apiBaseUrl = ''
+  private tenantAccessTokenCache: { token: string; expiresAt: number } | null = null
   /**
    * Track each outbound message's wire `msg_type` so `editMessage` can dispatch
    * to `update` (text/post) vs `patch` (interactive card) correctly. Lark
@@ -252,6 +319,9 @@ export class LarkAdapter implements PlatformAdapter {
     const creds = parseLarkCredentials(config.token)
     const sdkDomain = resolveLarkDomain(creds.domain)
     this.postLocale = creds.domain === 'lark' ? 'en_us' : 'zh_cn'
+    this.credentials = creds
+    this.apiBaseUrl = resolveLarkApiBaseUrl(creds.domain)
+    this.tenantAccessTokenCache = null
 
     // Construct REST client (sends + lookups go through this).
     this.client = new lark.Client({
@@ -319,6 +389,9 @@ export class LarkAdapter implements PlatformAdapter {
     // re-init works; the underlying socket gets garbage-collected.
     this.wsClient = null
     this.client = null
+    this.credentials = null
+    this.apiBaseUrl = ''
+    this.tenantAccessTokenCache = null
     this.connected = false
     this.sentMsgTypes.clear()
     this.ackedInboundMessages.clear()
@@ -385,6 +458,98 @@ export class LarkAdapter implements PlatformAdapter {
       if (!oldest) break
       this.ackedInboundMessages.delete(oldest)
     }
+  }
+
+  private async readLarkApiEnvelope<TData extends object>(
+    response: Awaited<ReturnType<typeof fetch>>,
+    operation: string,
+  ): Promise<LarkApiEnvelope<TData>> {
+    const text = await response.text()
+    let parsed: unknown = {}
+    if (text.length > 0) {
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        throw new Error(`${operation} returned a non-JSON response: ${text.slice(0, 500)}`)
+      }
+    }
+
+    const body = parsed as LarkApiEnvelope<TData>
+    const msg = typeof body.msg === 'string' && body.msg.length > 0 ? body.msg : ''
+    const code = typeof body.code === 'number' ? body.code : 0
+
+    if (!response.ok) {
+      throw new Error(`${operation} failed: HTTP ${response.status}${msg ? ` ${msg}` : ''}`)
+    }
+    if (code !== 0) {
+      throw new Error(`${operation} failed: ${code}${msg ? ` ${msg}` : ''}`)
+    }
+    return body
+  }
+
+  private async getTenantAccessToken(): Promise<string> {
+    const cached = this.tenantAccessTokenCache
+    if (cached && cached.expiresAt > Date.now() + 60_000) return cached.token
+
+    const creds = this.credentials
+    if (!creds || !this.apiBaseUrl) throw new Error('Lark adapter is not initialized')
+
+    const response = await fetch(`${this.apiBaseUrl}/open-apis/auth/v3/tenant_access_token/internal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ app_id: creds.appId, app_secret: creds.appSecret }),
+    })
+    const body = await this.readLarkApiEnvelope(response, 'get Lark tenant_access_token')
+    const token = body.tenant_access_token
+    if (typeof token !== 'string' || token.length === 0) {
+      throw new Error('Lark auth returned no tenant_access_token')
+    }
+
+    const expiresInSeconds = typeof body.expire === 'number' && body.expire > 0 ? body.expire : 5400
+    this.tenantAccessTokenCache = {
+      token,
+      expiresAt: Date.now() + Math.max(60, expiresInSeconds - 300) * 1000,
+    }
+    return token
+  }
+
+  private async uploadLarkFileWithFetch(file: Buffer, filename: string): Promise<string> {
+    const token = await this.getTenantAccessToken()
+    const form = new FormData()
+    form.append('file_type', resolveLarkFileType(filename))
+    form.append('file_name', filename)
+    form.append('file', new Blob([new Uint8Array(file)]), filename)
+
+    const response = await fetch(`${this.apiBaseUrl}/open-apis/im/v1/files`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    })
+    const body = await this.readLarkApiEnvelope<{ file_key?: string }>(response, 'upload Lark file')
+    const fileKey = body.data?.file_key
+    if (typeof fileKey !== 'string' || fileKey.length === 0) {
+      throw new Error('Lark file upload returned no file_key')
+    }
+    return fileKey
+  }
+
+  private async uploadLarkImageWithFetch(file: Buffer, filename: string): Promise<string> {
+    const token = await this.getTenantAccessToken()
+    const form = new FormData()
+    form.append('image_type', 'message')
+    form.append('image', new Blob([new Uint8Array(file)]), filename)
+
+    const response = await fetch(`${this.apiBaseUrl}/open-apis/im/v1/images`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    })
+    const body = await this.readLarkApiEnvelope<{ image_key?: string }>(response, 'upload Lark image')
+    const imageKey = body.data?.image_key
+    if (typeof imageKey !== 'string' || imageKey.length === 0) {
+      throw new Error('Lark image upload returned no image_key')
+    }
+    return imageKey
   }
 
   // -------------------------------------------------------------------------
@@ -618,33 +783,52 @@ export class LarkAdapter implements PlatformAdapter {
   ): Promise<SentMessage> {
     if (!this.client) throw new Error('Lark adapter is not connected')
 
-    const isImage = /\.(jpe?g|png|gif|webp|bmp)$/i.test(filename)
+    const isImage = /\.(jpe?g|png|gif|webp|bmp|tiff?|ico)$/i.test(filename)
+    const uploadLimit = isImage ? LARK_MAX_UPLOAD_IMAGE_BYTES : LARK_MAX_UPLOAD_FILE_BYTES
+    if (file.byteLength === 0) throw new Error('Lark file upload requires a non-empty file')
+    if (file.byteLength > uploadLimit) {
+      throw new Error(
+        `Lark ${isImage ? 'image' : 'file'} upload limit is ${uploadLimit} bytes; got ${file.byteLength}`,
+      )
+    }
 
     let content: string
     let msgType: 'image' | 'file'
-    if (isImage) {
-      const upload = await this.client.im.image.create({
-        data: { image_type: 'message', image: file },
-      })
-      const imageKey = upload?.image_key
-      if (!imageKey) throw new Error('Lark image upload returned no image_key')
-      content = JSON.stringify({ image_key: imageKey })
-      msgType = 'image'
-    } else {
-      const upload = await this.client.im.file.create({
-        data: { file_type: 'stream', file_name: filename, file: file },
-      })
-      const fileKey = upload?.file_key
-      if (!fileKey) throw new Error('Lark file upload returned no file_key')
-      content = JSON.stringify({ file_key: fileKey, file_name: filename })
-      msgType = 'file'
-    }
+    let messageId = ''
+    try {
+      if (isImage) {
+        const imageKey = await this.uploadLarkImageWithFetch(file, filename)
+        content = JSON.stringify({ image_key: imageKey })
+        msgType = 'image'
+      } else {
+        const fileKey = await this.uploadLarkFileWithFetch(file, filename)
+        content = JSON.stringify({ file_key: fileKey })
+        msgType = 'file'
+      }
 
-    const result = await this.client.im.message.create({
-      params: { receive_id_type: 'chat_id' },
-      data: { receive_id: channelId, msg_type: msgType, content },
-    })
-    const messageId = result?.data?.message_id ?? ''
+      this.log.info('[lark] uploaded outbound resource', {
+        event: 'lark_upload_resource_ok',
+        chatId: channelId,
+        fileName: filename,
+        fileSize: file.byteLength,
+        resourceType: msgType,
+      })
+
+      const result = await this.client.im.message.create({
+        params: { receive_id_type: 'chat_id' },
+        data: { receive_id: channelId, msg_type: msgType, content },
+      })
+      messageId = result?.data?.message_id ?? ''
+    } catch (err: unknown) {
+      this.log.error('[lark] failed to send file', {
+        event: 'lark_send_file_failed',
+        chatId: channelId,
+        fileName: filename,
+        fileSize: file.byteLength,
+        ...extractLarkErrorMeta(err),
+      })
+      throw err
+    }
 
     // Lark can't combine caption + file in one message. If the caller wants a
     // caption, send it as a follow-up text message (best-effort).

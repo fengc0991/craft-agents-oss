@@ -2,7 +2,7 @@ import * as React from 'react'
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
 import { useTranslation } from 'react-i18next'
-import type { ToolDisplayMeta, AnnotationV1 } from '@craft-agent/core'
+import type { ToolDisplayMeta, AnnotationV1, GeneratedFileReference } from '@craft-agent/core'
 import { normalizePath, pathStartsWith, stripPathPrefix } from '@craft-agent/core/utils'
 import { motion, AnimatePresence } from 'motion/react'
 import {
@@ -25,6 +25,7 @@ import {
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { Markdown } from '../markdown'
+import { resolveMarkdownLinkTarget } from '../markdown/link-target'
 import { Spinner } from '../ui/LoadingIndicator'
 import { type IslandTransitionConfig } from '../ui'
 import { AnnotationIslandMenu } from '../annotations/AnnotationIslandMenu'
@@ -272,6 +273,8 @@ export interface ResponseContent {
   messageId?: string
   /** Persisted annotations attached to the response message */
   annotations?: AnnotationV1[]
+  /** Structured metadata for assistant-generated file messages */
+  generatedFile?: GeneratedFileReference
 }
 
 // ============================================================================
@@ -1379,6 +1382,8 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
 export interface ResponseCardProps {
   /** The content to display (markdown) */
   text: string
+  /** Structured metadata for generated-file response cards */
+  generatedFile?: GeneratedFileReference
   /** Whether the content is still streaming */
   isStreaming: boolean
   /** When streaming started - used for buffering timeout calculation */
@@ -1466,6 +1471,63 @@ function BranchDropdown({ onBranch }: BranchDropdownProps) {
         </StyledDropdownMenuItem>
       </StyledDropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+function parseGeneratedFileText(text: string): GeneratedFileReference | undefined {
+  const trimmed = text.trim()
+  const linked = trimmed.match(/^Generated file:\s*\[([^\]]+)\]\(([^)]+)\)\s*$/i)
+  if (linked) {
+    const resolved = resolveMarkdownLinkTarget(linked[2] ?? '')
+    if (resolved.kind === 'file') {
+      return { name: linked[1] ?? resolved.path.split('/').pop() ?? resolved.path, path: resolved.path }
+    }
+  }
+
+  const plain = trimmed.match(/^Generated file:\s*(.+?)\s*\n(.+)\s*$/i)
+  if (plain) {
+    const path = plain[2]?.trim()
+    if (path) return { name: plain[1]?.trim() || path.split('/').pop() || path, path }
+  }
+
+  return undefined
+}
+
+function GeneratedFileCard({
+  file,
+  onOpenFile,
+}: {
+  file: GeneratedFileReference
+  onOpenFile?: (path: string) => void
+}) {
+  const clickable = !!onOpenFile
+
+  return (
+    <button
+      type="button"
+      disabled={!clickable}
+      onClick={() => onOpenFile?.(file.path)}
+      title={file.path}
+      className={cn(
+        "group w-full rounded-[8px] bg-background shadow-minimal border border-border/40 px-4 py-3 text-left",
+        "flex items-center gap-3 transition-colors",
+        clickable && "hover:bg-foreground/[0.025] cursor-pointer",
+        !clickable && "cursor-default"
+      )}
+    >
+      <span className="h-11 w-11 shrink-0 rounded-[8px] border border-accent/15 bg-accent/10 flex items-center justify-center">
+        <FileText className="h-5 w-5 text-accent" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-foreground">{file.name}</span>
+      </span>
+      <ArrowUpRight
+        className={cn(
+          "h-4 w-4 shrink-0 text-muted-foreground transition-colors",
+          clickable && "group-hover:text-foreground"
+        )}
+      />
+    </button>
   )
 }
 
@@ -1642,6 +1704,7 @@ function applyTextHighlightRange(
  */
 export function ResponseCard({
   text,
+  generatedFile,
   isStreaming,
   streamStartTime,
   onOpenFile,
@@ -2405,10 +2468,17 @@ export function ResponseCard({
 
   const isCompleted = !isStreaming
   const isBuffering = isStreaming && !bufferDecision.shouldShow
+  const generatedFileCard = generatedFile ?? (!isStreaming && variant === 'response'
+    ? parseGeneratedFileText(text)
+    : undefined)
 
   // While buffering, return null - TurnCard will show a subtle indicator instead
   if (isBuffering) {
     return null
+  }
+
+  if (isCompleted && variant === 'response' && generatedFileCard) {
+    return <GeneratedFileCard file={generatedFileCard} onOpenFile={onOpenFile} />
   }
 
   // Completed response or plan - show with max height and footer
@@ -3123,6 +3193,7 @@ export const TurnCard = React.memo(function TurnCard({
             >
               <ResponseCard
                 text={response.text}
+                generatedFile={response.generatedFile}
                 isStreaming={response.isStreaming}
                 streamStartTime={response.streamStartTime}
                 sessionId={sessionId}
@@ -3155,6 +3226,7 @@ export const TurnCard = React.memo(function TurnCard({
         <div className={cn("select-text", hasActivities && "mt-2")}>
           <ResponseCard
             text={response.text}
+            generatedFile={response.generatedFile}
             isStreaming={response.isStreaming}
             streamStartTime={response.streamStartTime}
             sessionId={sessionId}

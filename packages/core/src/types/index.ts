@@ -28,6 +28,7 @@ export type {
   ToolDisplayMeta,
   AttachmentType,
   MessageAttachment,
+  GeneratedFileReference,
   StoredAttachment,
   ContentBadge,
   AnnotationAuthor,
@@ -64,4 +65,3 @@ export type {
   SessionProcessingStatus,
   ActiveSessionInfo,
 } from './server.ts';
-
