@@ -1,5 +1,5 @@
 /**
- * Markdown → Lark `post` converter.
+ * Markdown → Lark/Feishu `post` converter.
  *
  * Lark/Feishu's `post` rich-text type is a structured JSON format with a
  * subset of formatting (bold, italic, strikethrough, links, code blocks).
@@ -16,19 +16,24 @@
  * limits the bug surface that haunts richer Markdown converters.
  */
 
-export type LarkPostStyle = 'bold' | 'italic' | 'underline' | 'strikethrough'
+export type LarkPostLocaleKey = 'zh_cn' | 'en_us'
+
+export type LarkPostStyle = 'bold' | 'italic' | 'underline' | 'lineThrough'
 
 export type LarkPostElement =
   | { tag: 'text'; text: string; style?: LarkPostStyle[] }
   | { tag: 'a'; text: string; href: string; style?: LarkPostStyle[] }
   | { tag: 'code_block'; language?: string; text: string }
+  | { tag: 'md'; text: string }
 
 export interface LarkPost {
-  post: {
-    en_us: {
-      content: LarkPostElement[][]
-    }
-  }
+  zh_cn?: LarkPostLocale
+  en_us?: LarkPostLocale
+}
+
+export interface LarkPostLocale {
+  title?: string
+  content: LarkPostElement[][]
 }
 
 export type LarkFormatted =
@@ -41,7 +46,7 @@ export type LarkFormatted =
  * Coverage:
  *   - `**bold**`              → `text` with `style: ['bold']`
  *   - `*italic*` / `_italic_` → `text` with `style: ['italic']`
- *   - `~~strike~~`            → `text` with `style: ['strikethrough']`
+ *   - `~~strike~~`            → `text` with `style: ['lineThrough']`
  *   - `[label](url)`          → `a` element
  *   - ` ```lang\ncode``` `    → `code_block` element
  *   - `` `inline` ``          → `text` with `style: ['bold']` (Lark has no
@@ -51,8 +56,19 @@ export type LarkFormatted =
  *
  * Out of scope (rendered as literal text): headers, lists, tables, images.
  */
-export function formatForLarkPost(markdown: string): LarkFormatted {
+export function formatForLarkPost(
+  markdown: string,
+  locale: LarkPostLocaleKey = 'zh_cn',
+): LarkFormatted {
   const trimmed = markdown.replace(/\r\n/g, '\n')
+
+  if (hasBlockMarkdown(trimmed)) {
+    return {
+      kind: 'post',
+      post: buildPost([[{ tag: 'md', text: trimmed }]], locale),
+    }
+  }
+
   const paragraphs = splitParagraphs(trimmed)
 
   const content: LarkPostElement[][] = []
@@ -83,7 +99,7 @@ export function formatForLarkPost(markdown: string): LarkFormatted {
 
   return {
     kind: 'post',
-    post: { post: { en_us: { content } } },
+    post: buildPost(content, locale),
   }
 }
 
@@ -92,14 +108,11 @@ export function formatForLarkPost(markdown: string): LarkFormatted {
  * the original send was a `post` and the edit content is plain — Lark
  * requires the new `msg_type` to match the original.
  */
-export function wrapAsTrivialPost(text: string): LarkPost {
-  return {
-    post: {
-      en_us: {
-        content: [[{ tag: 'text', text }]],
-      },
-    },
-  }
+export function wrapAsTrivialPost(
+  text: string,
+  locale: LarkPostLocaleKey = 'zh_cn',
+): LarkPost {
+  return buildPost([[{ tag: 'text', text }]], locale)
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +124,17 @@ function splitParagraphs(input: string): string[] {
   // paragraph but keep internal single-newlines (Lark wraps within a `text`).
   const raw = input.split(/\n{2,}/)
   return raw.map((p) => p.trimEnd()).filter((p) => p.length > 0)
+}
+
+function buildPost(content: LarkPostElement[][], locale: LarkPostLocaleKey): LarkPost {
+  const body: LarkPostLocale = { content }
+  return locale === 'en_us' ? { en_us: body } : { zh_cn: body }
+}
+
+function hasBlockMarkdown(input: string): boolean {
+  return /(^|\n)\s*\|.+\|\s*(\n|$)/.test(input) ||
+    /(^|\n)\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*(\n|$)/.test(input) ||
+    /(^|\n)\s{0,3}(#{1,6}\s|>\s|[-*+]\s+|\d+\.\s+)/.test(input)
 }
 
 function matchCodeBlock(para: string): { language: string | undefined; text: string } | null {
@@ -298,10 +322,10 @@ function tokenizeInline(input: string): InlineToken[] {
     // Strikethrough (~~)
     if (ch === '~' && next === '~') {
       flushBuf()
-      const open = !openStyles.has('strikethrough')
-      tokens.push({ type: open ? 'open' : 'close', value: '~~', style: 'strikethrough' })
-      if (open) openStyles.add('strikethrough')
-      else openStyles.delete('strikethrough')
+      const open = !openStyles.has('lineThrough')
+      tokens.push({ type: open ? 'open' : 'close', value: '~~', style: 'lineThrough' })
+      if (open) openStyles.add('lineThrough')
+      else openStyles.delete('lineThrough')
       i += 2
       continue
     }

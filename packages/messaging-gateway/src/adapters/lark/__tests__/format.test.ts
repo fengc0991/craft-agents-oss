@@ -6,7 +6,17 @@
  * headers/lists/tables intentionally fall through as plain text.
  */
 import { describe, expect, it } from 'bun:test'
-import { formatForLarkPost, wrapAsTrivialPost } from '../format'
+import {
+  formatForLarkPost,
+  wrapAsTrivialPost,
+  type LarkPost,
+  type LarkPostElement,
+} from '../format'
+
+function zhContent(post: LarkPost): LarkPostElement[][] {
+  expect(post.zh_cn).toBeDefined()
+  return post.zh_cn!.content
+}
 
 describe('formatForLarkPost — plain text path', () => {
   it('returns kind: text for input with no formatting', () => {
@@ -28,7 +38,7 @@ describe('formatForLarkPost — inline styles', () => {
     const result = formatForLarkPost('Some **bold** text')
     expect(result.kind).toBe('post')
     if (result.kind !== 'post') return
-    const elements = result.post.post.en_us.content[0]!
+    const elements = zhContent(result.post)[0]!
     const boldEl = elements.find((el) => el.tag === 'text' && el.text === 'bold')
     expect(boldEl).toBeDefined()
     expect((boldEl as { style?: string[] })?.style).toContain('bold')
@@ -38,33 +48,33 @@ describe('formatForLarkPost — inline styles', () => {
     const a = formatForLarkPost('Some *italic* text')
     expect(a.kind).toBe('post')
     if (a.kind === 'post') {
-      const italicEl = a.post.post.en_us.content[0]!.find((el) => el.tag === 'text' && el.text === 'italic')
+      const italicEl = zhContent(a.post)[0]!.find((el) => el.tag === 'text' && el.text === 'italic')
       expect((italicEl as { style?: string[] })?.style).toContain('italic')
     }
 
     const b = formatForLarkPost('Some _italic_ text')
     expect(b.kind).toBe('post')
     if (b.kind === 'post') {
-      const italicEl = b.post.post.en_us.content[0]!.find((el) => el.tag === 'text' && el.text === 'italic')
+      const italicEl = zhContent(b.post)[0]!.find((el) => el.tag === 'text' && el.text === 'italic')
       expect((italicEl as { style?: string[] })?.style).toContain('italic')
     }
   })
 
-  it('maps ~~strike~~ to strikethrough style', () => {
+  it('maps ~~strike~~ to lineThrough style', () => {
     const result = formatForLarkPost('A ~~strike~~ word')
     expect(result.kind).toBe('post')
     if (result.kind !== 'post') return
-    const strikeEl = result.post.post.en_us.content[0]!.find(
+    const strikeEl = zhContent(result.post)[0]!.find(
       (el) => el.tag === 'text' && el.text === 'strike',
     )
-    expect((strikeEl as { style?: string[] })?.style).toContain('strikethrough')
+    expect((strikeEl as { style?: string[] })?.style).toContain('lineThrough')
   })
 
   it('maps inline `code` to bold (documented fallback — Lark has no inline-code element)', () => {
     const result = formatForLarkPost('Use `npm install` here')
     expect(result.kind).toBe('post')
     if (result.kind !== 'post') return
-    const codeEl = result.post.post.en_us.content[0]!.find(
+    const codeEl = zhContent(result.post)[0]!.find(
       (el) => el.tag === 'text' && el.text === 'npm install',
     )
     expect((codeEl as { style?: string[] })?.style).toContain('bold')
@@ -76,7 +86,7 @@ describe('formatForLarkPost — links', () => {
     const result = formatForLarkPost('Visit [our docs](https://example.com/docs) here')
     expect(result.kind).toBe('post')
     if (result.kind !== 'post') return
-    const linkEl = result.post.post.en_us.content[0]!.find((el) => el.tag === 'a') as
+    const linkEl = zhContent(result.post)[0]!.find((el) => el.tag === 'a') as
       | { tag: 'a'; text: string; href: string }
       | undefined
     expect(linkEl).toBeDefined()
@@ -90,7 +100,7 @@ describe('formatForLarkPost — code blocks', () => {
     const result = formatForLarkPost('```python\nprint("hi")\n```')
     expect(result.kind).toBe('post')
     if (result.kind !== 'post') return
-    const para = result.post.post.en_us.content[0]!
+    const para = zhContent(result.post)[0]!
     expect(para.length).toBe(1)
     const codeEl = para[0]! as { tag: string; language?: string; text?: string }
     expect(codeEl.tag).toBe('code_block')
@@ -102,7 +112,7 @@ describe('formatForLarkPost — code blocks', () => {
     const result = formatForLarkPost('```\nbare code\n```')
     expect(result.kind).toBe('post')
     if (result.kind !== 'post') return
-    const codeEl = result.post.post.en_us.content[0]![0]! as { tag: string; language?: string }
+    const codeEl = zhContent(result.post)[0]![0]! as { tag: string; language?: string }
     expect(codeEl.tag).toBe('code_block')
     expect(codeEl.language).toBeUndefined()
   })
@@ -113,20 +123,37 @@ describe('formatForLarkPost — paragraphs', () => {
     const result = formatForLarkPost('First paragraph with **bold**.\n\nSecond paragraph.')
     expect(result.kind).toBe('post')
     if (result.kind !== 'post') return
-    expect(result.post.post.en_us.content.length).toBe(2)
+    expect(zhContent(result.post).length).toBe(2)
+  })
+})
+
+describe('formatForLarkPost — block Markdown', () => {
+  it('passes Markdown tables through the native md tag', () => {
+    const table = '| 姓名 | 年龄 |\n| --- | --- |\n| 张三 | 28 |'
+    const result = formatForLarkPost(table)
+    expect(result.kind).toBe('post')
+    if (result.kind !== 'post') return
+    expect(zhContent(result.post)).toEqual([[{ tag: 'md', text: table }]])
   })
 })
 
 describe('wrapAsTrivialPost', () => {
   it('produces a single-paragraph post with one text element, no styles', () => {
     const post = wrapAsTrivialPost('Hello there')
-    expect(post.post.en_us.content.length).toBe(1)
-    expect(post.post.en_us.content[0]!.length).toBe(1)
-    const el = post.post.en_us.content[0]![0]!
+    const content = zhContent(post)
+    expect(content.length).toBe(1)
+    expect(content[0]!.length).toBe(1)
+    const el = content[0]![0]!
     expect(el.tag).toBe('text')
     if (el.tag === 'text') {
       expect(el.text).toBe('Hello there')
       expect(el.style).toBeUndefined()
     }
+  })
+
+  it('can emit an en_us locale for Lark global tenants', () => {
+    const post = wrapAsTrivialPost('Hello there', 'en_us')
+    expect(post.en_us?.content[0]?.[0]).toEqual({ tag: 'text', text: 'Hello there' })
+    expect(post.zh_cn).toBeUndefined()
   })
 })

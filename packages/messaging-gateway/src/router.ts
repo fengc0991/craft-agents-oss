@@ -34,6 +34,9 @@ const NOOP_LOGGER: MessagingLogger = {
   child: () => NOOP_LOGGER,
 }
 
+const RECENT_INBOUND_TTL_MS = 10 * 60 * 1000
+const RECENT_INBOUND_MAX = 2000
+
 export interface RouterDeps {
   /** Reads the workspace's current MessagingConfig. Called per-message
    *  so config edits take effect without restart. */
@@ -46,6 +49,7 @@ export interface RouterDeps {
 export class Router {
   private readonly deps: RouterDeps
   private readonly recentRejectReplies = new Map<string, number>()
+  private readonly recentInboundMessages = new Map<string, number>()
 
   constructor(
     private readonly sessionManager: ISessionManager,
@@ -58,6 +62,20 @@ export class Router {
   }
 
   async route(adapter: PlatformAdapter, msg: IncomingMessage): Promise<void> {
+    const now = Date.now()
+    const dedupeKey = this.inboundDedupeKey(msg)
+    if (this.hasSeenInboundMessage(dedupeKey, now)) {
+      this.log.info('dropping duplicate inbound chat message', {
+        event: 'message_duplicate_dropped',
+        platform: msg.platform,
+        channelId: msg.channelId,
+        threadId: msg.threadId,
+        messageId: msg.messageId,
+      })
+      return
+    }
+    this.rememberInboundMessage(dedupeKey, now)
+
     // Threads (Telegram supergroup forum topics) participate in the binding
     // lookup key, so two topics in the same supergroup route to different
     // sessions even though they share `chat.id`.
@@ -170,5 +188,38 @@ export class Router {
       built.push(att)
     }
     return built.length > 0 ? built : undefined
+  }
+
+  private inboundDedupeKey(msg: IncomingMessage): string {
+    return JSON.stringify([msg.platform, msg.channelId, msg.threadId ?? null, msg.messageId])
+  }
+
+  private hasSeenInboundMessage(key: string, now: number): boolean {
+    const seenAt = this.recentInboundMessages.get(key)
+    if (seenAt === undefined) return false
+    if (now - seenAt > RECENT_INBOUND_TTL_MS) {
+      this.recentInboundMessages.delete(key)
+      return false
+    }
+    return true
+  }
+
+  private rememberInboundMessage(key: string, now: number): void {
+    this.recentInboundMessages.set(key, now)
+    if (this.recentInboundMessages.size <= RECENT_INBOUND_MAX) return
+    this.pruneRecentInboundMessages(now)
+  }
+
+  private pruneRecentInboundMessages(now: number): void {
+    for (const [key, seenAt] of this.recentInboundMessages) {
+      if (now - seenAt > RECENT_INBOUND_TTL_MS) {
+        this.recentInboundMessages.delete(key)
+      }
+    }
+    while (this.recentInboundMessages.size > RECENT_INBOUND_MAX) {
+      const oldestKey = this.recentInboundMessages.keys().next().value
+      if (!oldestKey) break
+      this.recentInboundMessages.delete(oldestKey)
+    }
   }
 }

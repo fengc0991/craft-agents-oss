@@ -1,7 +1,7 @@
 /**
  * Lark interactive-card builder tests.
  *
- * Schema 2.0 layout, label truncation, button cap, and the cleared-card
+ * Schema 2.0 layout, Markdown body, label truncation, button cap, and the cleared-card
  * shape used by `clearButtons`.
  */
 import { describe, expect, it } from 'bun:test'
@@ -27,16 +27,19 @@ describe('buildLarkCard', () => {
     expect((card as unknown as { elements?: unknown }).elements).toBeUndefined()
   })
 
-  it('produces schema 2.0 with text body + button elements (no `action` wrapper)', () => {
+  it('produces schema 2.0 with Markdown body + button elements (no `action` wrapper)', () => {
     const buttons: InlineButton[] = [
       { id: 'accept', label: 'Accept' },
       { id: 'reject', label: 'Reject' },
     ]
     const card = buildLarkCard('Plan ready. Approve?', buttons, { messageId })
     expect(card.schema).toBe('2.0')
-    // 1 text element + N button elements (no `action` wrapper in 2.0)
+    // 1 Markdown element + N button elements (no `action` wrapper in 2.0)
     expect(card.body.elements.length).toBe(3)
-    expect(card.body.elements[0]!.tag).toBe('div')
+    expect(card.body.elements[0]!.tag).toBe('markdown')
+    if (card.body.elements[0]!.tag === 'markdown') {
+      expect(card.body.elements[0]!.content).toBe('Plan ready. Approve?')
+    }
     expect(card.body.elements[1]!.tag).toBe('button')
     expect(card.body.elements[2]!.tag).toBe('button')
 
@@ -96,10 +99,10 @@ describe('buildLarkCard', () => {
 })
 
 describe('buildClearedCard', () => {
-  it('drops the action row, keeps only the text body, still under body', () => {
+  it('drops the action row, keeps only the Markdown body, still under body', () => {
     const card = buildClearedCard('Done.')
     expect(card.body.elements.length).toBe(1)
-    expect(card.body.elements[0]!.tag).toBe('div')
+    expect(card.body.elements[0]!.tag).toBe('markdown')
     expect((card as unknown as { elements?: unknown }).elements).toBeUndefined()
   })
 })

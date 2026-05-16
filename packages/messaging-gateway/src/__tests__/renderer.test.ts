@@ -201,6 +201,44 @@ describe('Renderer — progress mode (default)', () => {
     expect(edits[0]!.text).toBe('hello world')
   })
 
+  it('falls back to sending final text when the progress edit fails', async () => {
+    const adapter = makeAdapter()
+    adapter.editMessage = async (channelId: string, messageId: string, text: string) => {
+      adapter.calls.push({ kind: 'editMessage', channelId, messageId, text })
+      throw new Error('edit rejected')
+    }
+    const binding = makeBinding()
+
+    await play(renderer, binding, adapter, [
+      ev.delta('hello '),
+      ev.delta('world'),
+      ev.final('hello world'),
+      ev.complete(),
+    ])
+
+    const sends = adapter.calls.filter((c) => c.kind === 'sendText')
+    expect(sends.map((s) => s.text)).toEqual(['💭 thinking…', 'hello world'])
+    const edits = adapter.calls.filter((c) => c.kind === 'editMessage')
+    expect(edits.map((e) => e.text)).toEqual(['hello world'])
+  })
+
+  it('treats Lark progress bindings as final-only to avoid stale thinking bubbles', async () => {
+    const adapter = makeAdapter({ markdown: 'lark-post' })
+    const binding = makeBinding()
+    binding.platform = 'lark'
+
+    await play(renderer, binding, adapter, [
+      ev.delta('hello '),
+      ev.delta('world'),
+      ev.final('hello world'),
+      ev.complete(),
+    ])
+
+    expect(adapter.calls).toEqual([
+      { kind: 'sendText', channelId: 'chan-1', text: 'hello world', messageId: '1' },
+    ])
+  })
+
   it('drops intermediate text — never appears in any message', async () => {
     const adapter = makeAdapter()
     const binding = makeBinding()

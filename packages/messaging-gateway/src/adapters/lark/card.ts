@@ -3,7 +3,7 @@
  *
  * Lark "interactive" message type is a JSON card with a fixed schema. We use
  * schema 2.0, which supports rich elements (`div`, `action`, `markdown`, etc.).
- * Phase 2 only emits a minimal subset: a single text body element plus an
+ * Phase 2 only emits a minimal subset: a single Markdown body element plus an
  * action row of buttons. Each button's `value` carries our correlation IDs
  * so the gateway can route the press back to the right session.
  *
@@ -33,7 +33,7 @@ export interface LarkCardSchema {
   body: {
     direction?: 'vertical' | 'horizontal'
     elements: Array<
-      | { tag: 'div'; text: { tag: 'plain_text'; content: string } }
+      | { tag: 'markdown'; content: string }
       | {
           tag: 'button'
           text: { tag: 'plain_text'; content: string }
@@ -64,7 +64,7 @@ export function buildLarkCard(
     config: { wide_screen_mode: true },
     body: {
       elements: [
-        { tag: 'div', text: { tag: 'plain_text', content: text } },
+        { tag: 'markdown', content: text },
         // Schema 2.0: buttons sit directly inside `body.elements` (no `action`
         // wrapper) and the click payload moves into `behaviors[].value`.
         ...capped.map((btn, idx) => ({
@@ -95,14 +95,14 @@ function truncateLabel(label: string): string {
 
 /**
  * A "remove buttons" patch — used by `clearButtons` after a press is processed.
- * Drops the `action` element, keeping the original text body.
+ * Drops the button elements, keeping the original text body.
  */
 export function buildClearedCard(text: string): LarkCardSchema {
   return {
     schema: '2.0',
     config: { wide_screen_mode: true },
     body: {
-      elements: [{ tag: 'div', text: { tag: 'plain_text', content: text } }],
+      elements: [{ tag: 'markdown', content: text }],
     },
   }
 }

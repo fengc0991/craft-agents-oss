@@ -121,6 +121,18 @@ describe('Router', () => {
     expect(args[2]).toBeUndefined() // fileAttachments
   })
 
+  it('drops duplicate inbound message ids before forwarding to a session', async () => {
+    const { router, sessionManager } = makeRouter()
+    const adapter = makeFakeAdapter()
+
+    await router.route(adapter, baseMsg({ messageId: 'same-message', text: 'first delivery' }))
+    await router.route(adapter, baseMsg({ messageId: 'same-message', text: 'retry delivery' }))
+
+    expect(sessionManager.sendMessage).toHaveBeenCalledTimes(1)
+    const args = sessionManager.sendMessage.mock.calls[0]!
+    expect(args[1]).toBe('first delivery')
+  })
+
   it('materializes a localPath attachment into FileAttachment[]', async () => {
     const { router, sessionManager } = makeRouter()
     const pngPath = writeTinyPng()

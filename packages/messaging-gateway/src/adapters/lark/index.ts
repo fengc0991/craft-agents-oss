@@ -31,6 +31,7 @@ import {
   formatForLarkPost,
   wrapAsTrivialPost,
   type LarkPost,
+  type LarkPostLocaleKey,
 } from './format'
 import {
   buildLarkCard,
@@ -45,6 +46,8 @@ import {
  * we fail fast in the adapter with a user-visible reply.
  */
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+const ACK_REACTION_EMOJI = 'OK'
+const ACKED_MESSAGE_MAX = 2000
 
 const NOOP_LOGGER: MessagingLogger = {
   info: () => {},
@@ -124,6 +127,14 @@ function stripMentionPrefix(text: string): string {
  */
 interface LarkClient {
   im: {
+    v1?: {
+      messageReaction: {
+        create: (args: {
+          path: { message_id: string }
+          data: { reaction_type: { emoji_type: string } }
+        }) => Promise<{ data?: { reaction_id?: string } } | null>
+      }
+    }
     message: {
       create: (args: {
         params: { receive_id_type: 'chat_id' | 'open_id' | 'union_id' }
@@ -210,6 +221,8 @@ export class LarkAdapter implements PlatformAdapter {
   private buttonHandler: ((press: ButtonPress) => Promise<void>) | null = null
   private connected = false
   private log: MessagingLogger = NOOP_LOGGER
+  private postLocale: LarkPostLocaleKey = 'zh_cn'
+  private ackedInboundMessages = new Set<string>()
   /**
    * Track each outbound message's wire `msg_type` so `editMessage` can dispatch
    * to `update` (text/post) vs `patch` (interactive card) correctly. Lark
@@ -238,6 +251,7 @@ export class LarkAdapter implements PlatformAdapter {
     this.log = config.logger ?? NOOP_LOGGER
     const creds = parseLarkCredentials(config.token)
     const sdkDomain = resolveLarkDomain(creds.domain)
+    this.postLocale = creds.domain === 'lark' ? 'en_us' : 'zh_cn'
 
     // Construct REST client (sends + lookups go through this).
     this.client = new lark.Client({
@@ -307,6 +321,7 @@ export class LarkAdapter implements PlatformAdapter {
     this.client = null
     this.connected = false
     this.sentMsgTypes.clear()
+    this.ackedInboundMessages.clear()
   }
 
   isConnected(): boolean {
@@ -321,17 +336,70 @@ export class LarkAdapter implements PlatformAdapter {
     this.buttonHandler = handler
   }
 
+  private dispatchMessage(msg: IncomingMessage): void {
+    const handler = this.messageHandler
+    if (!handler) return
+    void handler(msg).catch((err: unknown) => {
+      this.log.error('[lark] message handler failed', {
+        event: 'lark_message_handler_failed',
+        messageId: msg.messageId,
+        chatId: msg.channelId,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    })
+  }
+
+  private acknowledgeInboundMessage(messageId: string): void {
+    if (!messageId || this.ackedInboundMessages.has(messageId)) return
+    this.ackedInboundMessages.add(messageId)
+    this.trimAckedInboundMessages()
+
+    void this.addReaction(messageId, ACK_REACTION_EMOJI).catch((err: unknown) => {
+      this.log.warn('[lark] failed to add inbound ack reaction', {
+        event: 'lark_ack_reaction_failed',
+        messageId,
+        emojiType: ACK_REACTION_EMOJI,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    })
+  }
+
+  private async addReaction(messageId: string, emojiType: string): Promise<void> {
+    if (!this.client?.im.v1?.messageReaction) {
+      this.log.warn('[lark] messageReaction API is unavailable on SDK client', {
+        event: 'lark_ack_reaction_api_missing',
+        messageId,
+        emojiType,
+      })
+      return
+    }
+    await this.client.im.v1.messageReaction.create({
+      path: { message_id: messageId },
+      data: { reaction_type: { emoji_type: emojiType } },
+    })
+  }
+
+  private trimAckedInboundMessages(): void {
+    while (this.ackedInboundMessages.size > ACKED_MESSAGE_MAX) {
+      const oldest = this.ackedInboundMessages.values().next().value
+      if (!oldest) break
+      this.ackedInboundMessages.delete(oldest)
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Outbound — sends, edits, files, cards
   // -------------------------------------------------------------------------
 
   async sendText(channelId: string, text: string, _opts?: SendOptions): Promise<SentMessage> {
     if (!this.client) throw new Error('Lark adapter is not connected')
-    const formatted = formatForLarkPost(text)
-    const { msgType, content } =
-      formatted.kind === 'text'
-        ? { msgType: 'text' as const, content: JSON.stringify({ text: formatted.text }) }
-        : { msgType: 'post' as const, content: JSON.stringify(formatted.post) }
+    const formatted = formatForLarkPost(text, this.postLocale)
+    const post =
+      formatted.kind === 'post'
+        ? formatted.post
+        : wrapAsTrivialPost(formatted.text, this.postLocale)
+    const msgType = 'post' as const
+    const content = JSON.stringify(post)
 
     const result = await this.client.im.message.create({
       params: { receive_id_type: 'chat_id' },
@@ -375,8 +443,11 @@ export class LarkAdapter implements PlatformAdapter {
     if (originalType === 'post') {
       // If the new content has formatting, format it; otherwise wrap as
       // a trivial post so the msg_type still matches the original.
-      const formatted = formatForLarkPost(text)
-      const post: LarkPost = formatted.kind === 'post' ? formatted.post : wrapAsTrivialPost(text)
+      const formatted = formatForLarkPost(text, this.postLocale)
+      const post: LarkPost =
+        formatted.kind === 'post'
+          ? formatted.post
+          : wrapAsTrivialPost(formatted.text, this.postLocale)
       content = JSON.stringify(post)
       msgType = 'post'
     } else {
@@ -616,6 +687,7 @@ export class LarkAdapter implements PlatformAdapter {
     // are dropped with an info log so users can see the bot received the event
     // but can't process it.
     if (message.message_type === 'text') {
+      this.acknowledgeInboundMessage(message.message_id)
       let text: string
       try {
         const parsed = JSON.parse(message.content) as { text?: string }
@@ -633,12 +705,20 @@ export class LarkAdapter implements PlatformAdapter {
         timestamp: parseInt(message.create_time, 10) || Date.now(),
         raw: message,
       }
-      await this.messageHandler(msg)
+      this.dispatchMessage(msg)
       return
     }
 
     if (message.message_type === 'image' || message.message_type === 'file') {
-      await this.handleAttachmentMessage(data)
+      this.acknowledgeInboundMessage(message.message_id)
+      void this.handleAttachmentMessage(data).catch((err: unknown) => {
+        this.log.error('[lark] attachment handler failed', {
+          event: 'lark_attachment_handler_failed',
+          messageId: message.message_id,
+          chatId: message.chat_id,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      })
       return
     }
 
@@ -705,7 +785,7 @@ export class LarkAdapter implements PlatformAdapter {
       timestamp: parseInt(message.create_time, 10) || Date.now(),
       raw: message,
     }
-    await this.messageHandler(msg)
+    this.dispatchMessage(msg)
   }
 
   /**

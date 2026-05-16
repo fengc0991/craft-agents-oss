@@ -184,7 +184,8 @@ export class Renderer {
     }
 
     const mode = resolveResponseMode(binding.config.responseMode, binding.config.streamResponses)
-    switch (mode) {
+    const effectiveMode = binding.platform === 'lark' && mode === 'progress' ? 'final_only' : mode
+    switch (effectiveMode) {
       case 'streaming':
         return this.handleStreaming(event, binding, adapter)
       case 'progress':
@@ -368,13 +369,16 @@ export class Renderer {
         const finalText = state.finalBuffer.trim()
         if (state.progressMessageId && adapter.capabilities.messageEditing) {
           if (finalText) {
-            await this.tryEditMessage(
+            const edited = await this.tryEditMessage(
               adapter,
               binding,
               state.progressMessageId,
               truncateForAdapter(finalText, adapter),
               state,
             )
+            if (!edited) {
+              await this.sendText(adapter, binding, finalText)
+            }
           }
           // If the run ended with no final text, leave the last status in
           // place rather than deleting/editing to an empty string — avoids
@@ -620,7 +624,7 @@ Approve in the desktop app to continue.`,
     messageId: string,
     text: string,
     state: RenderState,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const truncated = truncateForAdapter(text, adapter)
 
     try {
@@ -628,6 +632,7 @@ Approve in the desktop app to continue.`,
       // message_thread_id, but we pass it for caller uniformity.
       await adapter.editMessage(binding.channelId, messageId, truncated, bindingOpts(binding))
       state.currentEditIntervalMs = DEFAULT_EDIT_INTERVAL_MS
+      return true
     } catch (err: unknown) {
       const is429 =
         err instanceof Error &&
@@ -639,6 +644,7 @@ Approve in the desktop app to continue.`,
         }, BACKOFF_RESET_MS)
       }
       // Other errors: silently skip — text_complete / complete will retry.
+      return false
     }
   }
 
