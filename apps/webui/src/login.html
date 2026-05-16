@@ -245,10 +245,42 @@
     <div id="error" class="error"></div>
   </div>
 
-  <script>
+  <script type="module">
     const form = document.getElementById('login-form');
     const errorEl = document.getElementById('error');
     const submitBtn = document.getElementById('submit-btn');
+    const passwordInput = document.getElementById('password');
+
+    async function resolveInitialToken() {
+      const params = new URLSearchParams(window.location.search);
+      const tokenFromUrl = params.get('token') || '';
+      if (tokenFromUrl) {
+        params.delete('token');
+        const cleanQuery = params.toString();
+        const cleanUrl = window.location.pathname + (cleanQuery ? `?${cleanQuery}` : '') + window.location.hash;
+        window.history.replaceState(null, document.title, cleanUrl);
+        return tokenFromUrl;
+      }
+
+      try {
+        const res = await fetch('/__craft/dev-login-token', { cache: 'no-store' });
+        if (!res.ok) return '';
+        const data = await res.json().catch(() => ({}));
+        return typeof data.token === 'string' ? data.token : '';
+      } catch {
+        return '';
+      }
+    }
+
+    async function fillAndSubmitDevToken() {
+      const initialToken = await resolveInitialToken();
+      if (!initialToken) return;
+
+      passwordInput.value = initialToken;
+      passwordInput.focus();
+      passwordInput.select();
+      form.requestSubmit();
+    }
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -257,7 +289,7 @@
       submitBtn.textContent = 'Signing in...';
 
       try {
-        const password = document.getElementById('password').value;
+        const password = passwordInput.value;
         const res = await fetch('/api/auth', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -281,6 +313,8 @@
         submitBtn.textContent = 'Sign In';
       }
     });
+
+    fillAndSubmitDevToken();
   </script>
 </body>
 </html>

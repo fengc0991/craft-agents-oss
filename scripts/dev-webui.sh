@@ -20,6 +20,7 @@ ALLOW_INSECURE_BIND="${CRAFT_WEBUI_ALLOW_INSECURE_BIND:-true}"
 KILL_PORTS="${CRAFT_WEBUI_KILL_PORTS:-true}"
 SKIP_SUBPROCESS_BUILD="${CRAFT_WEBUI_SKIP_SUBPROCESS_BUILD:-false}"
 BACKEND_TIMEOUT="${CRAFT_WEBUI_BACKEND_TIMEOUT:-30}"
+PREFILL_TOKEN="${CRAFT_WEBUI_PREFILL_TOKEN:-true}"
 
 server_pid=""
 webui_pid=""
@@ -231,17 +232,18 @@ print_access_hint() {
   local public_url_host
   public_url_host="$(url_host "$public_host")"
   local login_password="${CRAFT_WEBUI_PASSWORD:-$CRAFT_SERVER_TOKEN}"
+  local frontend_url="$frontend_http_scheme://$public_url_host:$CRAFT_WEBUI_PORT/"
 
   echo ""
   info "WebUI dev stack is starting"
   echo "  repo:             $REPO_ROOT"
   echo "  env file:         $ENV_FILE"
   echo "  backend:          $backend_ws_scheme://$(url_host "$CRAFT_RPC_HOST"):$CRAFT_RPC_PORT"
-  echo "  frontend:         $frontend_http_scheme://$public_url_host:$CRAFT_WEBUI_PORT"
+  echo "  frontend:         $frontend_url"
   echo "  browser ws url:   $CRAFT_WEBUI_WS_URL"
   echo "  login password:   $login_password"
   echo ""
-  echo "Open the frontend URL above and sign in with the login password."
+  echo "Open the frontend URL above; dev login will use the token automatically."
   echo "Press Ctrl+C to stop both frontend and backend."
   echo ""
 }
@@ -274,6 +276,12 @@ if [ -z "${CRAFT_SERVER_TOKEN:-}" ]; then
 fi
 
 export CRAFT_SERVER_TOKEN
+
+if is_enabled "$PREFILL_TOKEN"; then
+  export VITE_CRAFT_WEBUI_DEV_TOKEN="${CRAFT_WEBUI_PASSWORD:-$CRAFT_SERVER_TOKEN}"
+else
+  unset VITE_CRAFT_WEBUI_DEV_TOKEN
+fi
 
 backend_http_scheme="http"
 backend_ws_scheme="ws"

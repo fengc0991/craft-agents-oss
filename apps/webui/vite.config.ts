@@ -5,6 +5,23 @@ import { resolve } from 'path'
 
 export default defineConfig({
   plugins: [
+    {
+      name: 'craft-webui-dev-login-token',
+      configureServer(server) {
+        server.middlewares.use('/__craft/dev-login-token', (_req, res, next) => {
+          const token = process.env.VITE_CRAFT_WEBUI_DEV_TOKEN
+          if (!token) {
+            next()
+            return
+          }
+
+          res.statusCode = 200
+          res.setHeader('Content-Type', 'application/json; charset=utf-8')
+          res.setHeader('Cache-Control', 'no-store')
+          res.end(JSON.stringify({ token }))
+        })
+      },
+    },
     react({
       babel: {
         plugins: [

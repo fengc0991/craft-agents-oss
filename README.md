@@ -181,7 +181,7 @@ To run the browser WebUI and the headless server together from one shell:
 bash scripts/dev-webui.sh
 ```
 
-The script starts the backend on `CRAFT_RPC_PORT` (default `9100`, bound to `127.0.0.1`) and the Vite WebUI on `CRAFT_WEBUI_PORT` (default `5175`). Browser API and WebSocket traffic go through the Vite proxy, so normally you only need to open the printed WebUI URL. The script generates a persistent `CRAFT_SERVER_TOKEN` in `~/.craft-agent/webui.env` when one is not already set, prints the WebUI URL and login password, and stops both processes when you press `Ctrl+C`.
+The script starts the backend on `CRAFT_RPC_PORT` (default `9100`, bound to `127.0.0.1`) and the Vite WebUI on `CRAFT_WEBUI_PORT` (default `5175`). Browser API and WebSocket traffic go through the Vite proxy, so normally you only need to open the printed WebUI URL. The script generates a persistent `CRAFT_SERVER_TOKEN` in `~/.craft-agent/webui.env` when one is not already set, injects it into the dev login page, and stops both processes when you press `Ctrl+C`.
 
 Common overrides:
 
@@ -194,6 +194,9 @@ CRAFT_WEBUI_PUBLIC_HOST=203.0.113.5 bash scripts/dev-webui.sh
 
 # Reuse a token explicitly
 CRAFT_SERVER_TOKEN=<token> bash scripts/dev-webui.sh
+
+# Disable dev token injection
+CRAFT_WEBUI_PREFILL_TOKEN=false bash scripts/dev-webui.sh
 ```
 
 You can also run the same script through Bun:
