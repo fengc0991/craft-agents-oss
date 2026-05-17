@@ -45,7 +45,7 @@ const REAL_GLOBAL_SKILLS_DIR = join(homedir(), '.agents', 'skills');
 function createSkill(
   skillsDir: string,
   slug: string,
-  opts: { name?: string; description?: string; globs?: string[]; content?: string; icon?: string; requiredSources?: string[] } = {}
+  opts: { name?: string; description?: string; globs?: string[]; content?: string; icon?: string; requiredSources?: string[]; category?: string } = {}
 ): string {
   const skillDir = join(skillsDir, slug);
   mkdirSync(skillDir, { recursive: true });
@@ -58,10 +58,11 @@ function createSkill(
   const requiredSources = opts.requiredSources
     ? `\nrequiredSources:\n${opts.requiredSources.map(source => `  - "${source}"`).join('\n')}`
     : '';
+  const category = opts.category ? `\ncategory: "${opts.category}"` : '';
 
   const skillMd = `---
 name: "${name}"
-description: "${description}"${globs}${icon}${requiredSources}
+description: "${description}"${globs}${icon}${requiredSources}${category}
 ---
 
 ${content}
@@ -181,6 +182,17 @@ describe('loadSkill', () => {
 
     expect(skill).not.toBeNull();
     expect(skill!.metadata.requiredSources).toEqual(['linear', 'github']);
+  });
+
+  it('should load a single category from frontmatter', () => {
+    createSkill(join(workspaceRoot, 'skills'), 'categorized', {
+      category: 'file-operations',
+    });
+
+    const skill = loadSkill(workspaceRoot, 'categorized');
+
+    expect(skill).not.toBeNull();
+    expect(skill!.metadata.category).toBe('file-operations');
   });
 
   it('should normalize single-string requiredSources into an array', () => {

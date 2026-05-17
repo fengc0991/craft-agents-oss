@@ -26,6 +26,8 @@ export interface SkillMetadata {
   icon?: string;
   /** Optional source slugs to auto-enable when this skill is invoked */
   requiredSources?: string[];
+  /** Optional single category used to group skills in the UI */
+  category?: string;
 }
 
 /** Source of a loaded skill */

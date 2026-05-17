@@ -531,7 +531,7 @@ Use the browser as an **alternative/fallback** path when source setup is fragile
   const skillsListing = skills.length > 0
     ? `\n## Available Skills\n\n` +
       skills.map(s =>
-        `- **\`[skill:${s.slug}]\`** — ${s.metadata.name}: ${s.metadata.description}`
+        `- **\`[skill:${s.slug}]\`** — ${s.metadata.name}${s.metadata.category ? ` [${s.metadata.category}]` : ''}: ${s.metadata.description}`
       ).join('\n') +
       `\n\n> **Progressive disclosure:** The agent can detect \`[skill:slug]\` syntax in user messages` +
       ` and will auto-read the corresponding SKILL.md. Some skills may define additional` +

@@ -11,6 +11,25 @@ import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
 import { useActiveWorkspace, useAppShellContext } from '@/context/AppShellContext'
 import type { LoadedSkill } from '../../../shared/types'
 
+const KNOWN_CATEGORY_ORDER = [
+  'builtin',
+  'file-operations',
+  'finance',
+  'visualization',
+  'writing',
+  'research',
+  'observability',
+  'uncategorized',
+]
+
+function fallbackCategoryLabel(category: string) {
+  return category
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
 export interface SkillsListPanelProps {
   skills: LoadedSkill[]
   onDeleteSkill: (skillSlug: string) => void
@@ -36,6 +55,51 @@ export function SkillsListPanel({
   const { workspaces, activeWorkspaceId } = useAppShellContext()
   const hasOtherWorkspaces = workspaces.length > 1
 
+  const categoryLabels = React.useMemo<Record<string, string>>(() => ({
+    builtin: t('skillsCategory.builtin'),
+    'file-operations': t('skillsCategory.fileOperations'),
+    finance: t('skillsCategory.finance'),
+    visualization: t('skillsCategory.visualization'),
+    writing: t('skillsCategory.writing'),
+    research: t('skillsCategory.research'),
+    observability: t('skillsCategory.observability'),
+    uncategorized: t('skillsList.uncategorized'),
+  }), [t])
+
+  const getCategoryKey = React.useCallback((skill: LoadedSkill) => (
+    skill.metadata.category?.trim() || 'uncategorized'
+  ), [])
+
+  const getCategoryLabel = React.useCallback((category: string) => (
+    categoryLabels[category] || fallbackCategoryLabel(category)
+  ), [categoryLabels])
+
+  const skillGroups = React.useMemo(() => {
+    const grouped = new Map<string, LoadedSkill[]>()
+    for (const skill of skills) {
+      const category = getCategoryKey(skill)
+      const group = grouped.get(category)
+      if (group) group.push(skill)
+      else grouped.set(category, [skill])
+    }
+
+    return Array.from(grouped.entries())
+      .sort(([a], [b]) => {
+        const aIndex = KNOWN_CATEGORY_ORDER.indexOf(a)
+        const bIndex = KNOWN_CATEGORY_ORDER.indexOf(b)
+        if (aIndex !== -1 || bIndex !== -1) {
+          return (aIndex === -1 ? Number.MAX_SAFE_INTEGER : aIndex)
+            - (bIndex === -1 ? Number.MAX_SAFE_INTEGER : bIndex)
+        }
+        return getCategoryLabel(a).localeCompare(getCategoryLabel(b))
+      })
+      .map(([category, items]) => ({
+        key: category,
+        label: getCategoryLabel(category),
+        items,
+      }))
+  }, [getCategoryKey, getCategoryLabel, skills])
+
   // Send to Workspace dialog state
   const [sendDialogOpen, setSendDialogOpen] = React.useState(false)
   const [sendResourceSlug, setSendResourceSlug] = React.useState<string | null>(null)
@@ -45,6 +109,7 @@ export function SkillsListPanel({
     <>
     <EntityPanel<LoadedSkill>
       items={skills}
+      groups={skillGroups}
       getId={(s) => s.slug}
       selection={skillSelection}
       selectedId={selectedSkillSlug}
@@ -81,6 +146,9 @@ export function SkillsListPanel({
                 {t('skillsList.projectBadge')}
               </span>
             )}
+            <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-foreground/5 text-muted-foreground">
+              {getCategoryLabel(getCategoryKey(skill))}
+            </span>
             <span className="truncate">{skill.metadata.description}</span>
           </span>
         ),

@@ -118,6 +118,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
   // Get skill name for header
   const skillName = skill?.metadata.name || skillSlug
   const canDeleteSkill = skill?.source === 'workspace'
+  const skillCategory = skill?.metadata.category?.trim()
 
   // Format path to show just the skill-relative portion (skills/{slug}/)
   const formatPath = (path: string) => {
@@ -188,6 +189,11 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
               <Info_Table.Row label={t('common.description')}>
                 {skill.metadata.description}
               </Info_Table.Row>
+              {skillCategory && (
+                <Info_Table.Row label={t('common.category')}>
+                  {skillCategory}
+                </Info_Table.Row>
+              )}
               <Info_Table.Row label={t('common.source')}>
                 {skill.source === 'project' ? t('skillInfo.sourceProject') :
                  skill.source === 'global' ? t('skillInfo.sourceGlobal') :

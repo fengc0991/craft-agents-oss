@@ -8,6 +8,7 @@
 import * as React from 'react'
 import { useAction } from '@/actions'
 import { EntityList } from './entity-list'
+import type { EntityListGroup } from './entity-list'
 import { EntityRow } from './entity-row'
 import { useEntityListInteractions } from '@/hooks/useEntityListInteractions'
 import type { createEntitySelection } from '@/hooks/useEntitySelection'
@@ -23,6 +24,7 @@ export interface EntityPanelItem {
 
 export interface EntityPanelProps<T> {
   items: T[]
+  groups?: EntityListGroup<T>[]
   getId: (item: T) => string
   mapItem: (item: T) => EntityPanelItem
   selection: ReturnType<typeof createEntitySelection>
@@ -37,6 +39,7 @@ export interface EntityPanelProps<T> {
 
 export function EntityPanel<T>({
   items,
+  groups,
   getId,
   mapItem,
   selection,
@@ -68,9 +71,18 @@ export function EntityPanel<T>({
     ? { ...interactions.listProps.containerProps, ...containerProps }
     : interactions.listProps.containerProps
 
+  const indexById = React.useMemo(() => {
+    const index = new Map<string, number>()
+    interactions.items.forEach((item, itemIndex) => {
+      index.set(getId(item), itemIndex)
+    })
+    return index
+  }, [interactions.items, getId])
+
   return (
     <EntityList
       items={items}
+      groups={groups}
       getKey={getId}
       containerRef={interactions.listProps.containerRef}
       containerProps={mergedContainerProps}
@@ -78,7 +90,8 @@ export function EntityPanel<T>({
       emptyState={emptyState}
       renderItem={(item, index, isFirst) => {
         const mapped = mapItem(item)
-        const rowProps = interactions.getRowProps(item, index)
+        const rowIndex = indexById.get(getId(item)) ?? index
+        const rowProps = interactions.getRowProps(item, rowIndex)
         return (
           <EntityRow
             icon={mapped.icon}

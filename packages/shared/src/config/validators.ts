@@ -658,6 +658,7 @@ export const SkillMetadataSchema = z.object({
   description: z.string().min(1, "Add a 'description' field explaining what this skill does and when to use it (1-2 sentences)"),
   globs: z.array(z.string()).optional(),
   alwaysAllow: z.array(z.string()).optional(),
+  category: z.string().min(1).optional(),
 });
 
 /**

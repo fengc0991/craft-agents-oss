@@ -60,6 +60,7 @@ The format is identical to Claude Code SDK skills:
 ---
 name: "Skill Display Name"
 description: "Brief description shown in skill list"
+category: "file-operations"  # Optional: single category for grouping in the UI
 globs: ["*.ts", "*.tsx"]     # Optional: file patterns that trigger skill
 alwaysAllow: ["Bash"]        # Optional: tools to always allow
 requiredSources:             # Optional: sources to auto-enable on invocation
@@ -89,6 +90,11 @@ Display name for the skill. Shown in the UI and skill list.
 
 ### description (required)
 Brief description (1-2 sentences) explaining what the skill does.
+
+### category (optional)
+Single category used to group skills in the UI. Use one concise slug such as
+`builtin`, `file-operations`, `finance`, `visualization`, `writing`, or a
+workspace-specific category. Each skill should have at most one category.
 
 ### globs (optional)
 Array of glob patterns. When a file matching these patterns is being worked on,
