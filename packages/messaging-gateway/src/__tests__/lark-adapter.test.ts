@@ -10,7 +10,9 @@
  * via manual smoke against a real Lark Custom App.
  */
 import { describe, expect, it } from 'bun:test'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { parseLarkCredentials, LarkAdapter, type LarkCredentials } from '../adapters/lark/index'
+import type { IncomingMessage } from '../types'
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void
@@ -100,6 +102,46 @@ function installFakeLarkUploads(adapter: LarkAdapter): {
     return 'img_1'
   }
   return { fileUploadCalls, imageUploadCalls }
+}
+
+function installFakeLarkResourceClient(adapter: LarkAdapter, file: Buffer): {
+  resourceCalls: unknown[]
+  reactionCalls: unknown[]
+} {
+  const resourceCalls: unknown[] = []
+  const reactionCalls: unknown[] = []
+  ;(adapter as unknown as { client: unknown }).client = {
+    im: {
+      v1: {
+        messageReaction: {
+          create: async (args: unknown) => {
+            reactionCalls.push(args)
+            return { data: { reaction_id: `reaction_${reactionCalls.length}` } }
+          },
+        },
+      },
+      messageResource: {
+        get: async (args: unknown) => {
+          resourceCalls.push(args)
+          return {
+            writeFile: async (path: string) => {
+              writeFileSync(path, file)
+            },
+          }
+        },
+      },
+    },
+  }
+  return { resourceCalls, reactionCalls }
+}
+
+async function waitForIncomingMessage(promise: Promise<IncomingMessage>): Promise<IncomingMessage> {
+  return await Promise.race([
+    promise,
+    new Promise<IncomingMessage>((_, reject) => {
+      setTimeout(() => reject(new Error('timed out waiting for incoming message')), 100)
+    }),
+  ])
 }
 
 describe('parseLarkCredentials', () => {
@@ -453,5 +495,48 @@ describe('LarkAdapter — static contract', () => {
 
     gate.resolve()
     await call
+  })
+
+  it('downloads inbound file messages through Lark messageResource and emits localPath attachments', async () => {
+    const adapter = new LarkAdapter()
+    const calls = installFakeLarkResourceClient(adapter, Buffer.from('# hello from feishu'))
+    let resolveSeen!: (msg: IncomingMessage) => void
+    const seen = new Promise<IncomingMessage>((resolve) => {
+      resolveSeen = resolve
+    })
+    adapter.onMessage(async (msg) => {
+      resolveSeen(msg)
+    })
+
+    await (
+      adapter as unknown as {
+        handleIncomingMessage(data: unknown): Promise<void>
+      }
+    ).handleIncomingMessage({
+      sender: { sender_id: { user_id: 'user-1' } },
+      message: {
+        message_id: 'om_file_1',
+        chat_id: 'oc_1',
+        chat_type: 'p2p',
+        message_type: 'file',
+        content: JSON.stringify({ file_key: 'file_key_1', file_name: 'brief.md' }),
+        create_time: String(Date.now()),
+      },
+    })
+
+    const msg = await waitForIncomingMessage(seen)
+    const attachment = msg.attachments?.[0]
+    expect(calls.resourceCalls).toEqual([
+      {
+        path: { message_id: 'om_file_1', file_key: 'file_key_1' },
+        params: { type: 'file' },
+      },
+    ])
+    expect(attachment?.type).toBe('document')
+    expect(attachment?.fileId).toBe('file_key_1')
+    expect(attachment?.fileName).toBe('brief.md')
+    expect(attachment?.localPath).toBeTruthy()
+    expect(readFileSync(attachment!.localPath!, 'utf8')).toBe('# hello from feishu')
+    rmSync(attachment!.localPath!, { force: true })
   })
 })

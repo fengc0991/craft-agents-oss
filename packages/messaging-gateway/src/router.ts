@@ -10,8 +10,9 @@
  */
 
 import type { ISessionManager } from '@craft-agent/server-core/handlers'
+import type { StoredAttachment } from '@craft-agent/core/types'
 import { readFileAttachment } from '@craft-agent/shared/utils'
-import type { FileAttachment } from '@craft-agent/shared/protocol'
+import type { FileAttachment as RuntimeFileAttachment } from '@craft-agent/shared/utils'
 import {
   evaluateBindingAccess,
   executeRejection,
@@ -97,6 +98,7 @@ export class Router {
 
       try {
         const fileAttachments = this.resolveAttachments(msg)
+        const storedAttachments = this.toStoredAttachments(msg, fileAttachments)
         this.log.info('routing inbound chat message to session', {
           event: 'message_routed',
           platform: msg.platform,
@@ -110,7 +112,7 @@ export class Router {
           binding.sessionId,
           msg.text,
           fileAttachments,
-          undefined, // storedAttachments (handled by session layer)
+          storedAttachments,
           undefined, // SendMessageOptions
         )
       } catch (err) {
@@ -177,17 +179,41 @@ export class Router {
    * silently skipped — the upstream adapter already logged/notified on
    * download failure, so re-surfacing here would double up.
    */
-  private resolveAttachments(msg: IncomingMessage): FileAttachment[] | undefined {
+  private resolveAttachments(msg: IncomingMessage): RuntimeFileAttachment[] | undefined {
     if (!msg.attachments?.length) return undefined
-    const built: FileAttachment[] = []
+    const built: RuntimeFileAttachment[] = []
     for (const a of msg.attachments) {
       if (!a.localPath) continue
-      const att = readFileAttachment(a.localPath) as FileAttachment | null
+      const att = readFileAttachment(a.localPath) as RuntimeFileAttachment | null
       if (!att) continue
       if (a.fileName) att.name = a.fileName
+      // Messaging adapters have already materialized the platform blob to a
+      // local file. Session agents surface non-inline attachments (docx, txt,
+      // audio, etc.) via `storedPath`, so preserve that path here; otherwise
+      // the session receives an attachment object that the model never sees.
+      att.storedPath ??= a.localPath
       built.push(att)
     }
     return built.length > 0 ? built : undefined
+  }
+
+  private toStoredAttachments(
+    msg: IncomingMessage,
+    attachments: RuntimeFileAttachment[] | undefined,
+  ): StoredAttachment[] | undefined {
+    if (!attachments?.length) return undefined
+    const stored = attachments
+      .filter((a): a is RuntimeFileAttachment & { storedPath: string } => typeof a.storedPath === 'string' && a.storedPath.length > 0)
+      .map((a, index): StoredAttachment => ({
+        id: `${msg.platform}-${msg.messageId}-${index}`,
+        type: a.type,
+        name: a.name,
+        mimeType: a.mimeType,
+        size: a.size,
+        storedPath: a.storedPath,
+        ...(a.markdownPath ? { markdownPath: a.markdownPath } : {}),
+      }))
+    return stored.length > 0 ? stored : undefined
   }
 
   private inboundDedupeKey(msg: IncomingMessage): string {

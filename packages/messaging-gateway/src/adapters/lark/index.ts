@@ -10,7 +10,7 @@
  * interactive cards, attachments, and Markdown→post rich-text formatting.
  */
 
-import { writeFileSync } from 'node:fs'
+import { statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { extname, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
@@ -240,6 +240,12 @@ interface LarkClient {
       create: (args: {
         data: { image_type: 'message' | 'avatar'; image: Buffer }
       }) => Promise<{ image_key?: string; data?: { image_key?: string } } | null>
+    }
+    messageResource?: {
+      get: (args: {
+        path: { message_id: string; file_key: string }
+        params: { type: 'image' | 'file' }
+      }) => Promise<{ writeFile?: (path: string) => Promise<unknown>; file?: Buffer } & Record<string, unknown>>
     }
   }
 }
@@ -1046,25 +1052,33 @@ export class LarkAdapter implements PlatformAdapter {
   }): Promise<string | null> {
     if (!this.client) return null
     try {
-      // The SDK's `im.message.resource.get` returns a Node stream-like object
-      // with a `writeFile` helper for the common case. We use that for size+brevity.
-      const sdkResource = await (
-        (this.client as unknown as {
-          im: {
-            message: {
-              resource: {
-                get: (args: {
-                  path: { message_id: string; file_key: string }
-                  params: { type: 'image' | 'file' }
-                }) => Promise<{ writeFile: (path: string) => Promise<void> } & Record<string, unknown>>
-              }
+      // The SDK exposes incoming message-resource downloads at
+      // `im.messageResource.get`. Keep a legacy nested fallback for older
+      // local mocks / SDK shapes, but prefer the generated client surface.
+      const currentResource = this.client.im.messageResource
+      const legacyResource = (this.client as unknown as {
+        im?: {
+          message: {
+            resource?: {
+              get?: (args: {
+                path: { message_id: string; file_key: string }
+                params: { type: 'image' | 'file' }
+              }) => Promise<{ writeFile?: (path: string) => Promise<unknown>; file?: Buffer } & Record<string, unknown>>
             }
           }
-        }).im.message.resource.get
-      )({
+        }
+      }).im?.message?.resource
+      if (!currentResource?.get && !legacyResource?.get) {
+        throw new Error('Lark messageResource API is unavailable on SDK client')
+      }
+
+      const resourceArgs = {
         path: { message_id: args.messageId, file_key: args.fileKey },
         params: { type: args.isImage ? 'image' : 'file' },
-      })
+      } as const
+      const sdkResource = currentResource?.get
+        ? await currentResource.get(resourceArgs)
+        : await legacyResource!.get!(resourceArgs)
 
       const ext = extname(args.filename) || (args.isImage ? '.jpg' : '.bin')
       const localPath = join(tmpdir(), `lark-${randomBytes(8).toString('hex')}${ext}`)
@@ -1072,6 +1086,11 @@ export class LarkAdapter implements PlatformAdapter {
       // a plain Node Readable. Handle the common shapes.
       if (typeof sdkResource.writeFile === 'function') {
         await sdkResource.writeFile(localPath)
+        const size = statSync(localPath).size
+        if (size > MAX_ATTACHMENT_BYTES) {
+          try { unlinkSync(localPath) } catch {}
+          throw new Error(`attachment exceeds ${MAX_ATTACHMENT_BYTES} bytes`)
+        }
       } else if (sdkResource.file instanceof Buffer) {
         const buf = sdkResource.file
         if (buf.length > MAX_ATTACHMENT_BYTES) {

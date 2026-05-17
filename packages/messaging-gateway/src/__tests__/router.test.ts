@@ -157,12 +157,64 @@ describe('Router', () => {
       type: string
       name: string
       base64?: string
+      storedPath?: string
     }>
     expect(fileAttachments).toHaveLength(1)
     const first = fileAttachments[0]!
     expect(first.type).toBe('image')
     expect(first.name).toBe('my-photo.png')
+    expect(first.storedPath).toBe(pngPath)
     expect(first.base64 && first.base64.length).toBeGreaterThan(0)
+
+    const storedAttachments = args[3] as Array<{
+      id: string
+      name: string
+      storedPath: string
+    }>
+    expect(storedAttachments).toHaveLength(1)
+    expect(storedAttachments[0]?.name).toBe('my-photo.png')
+    expect(storedAttachments[0]?.storedPath).toBe(pngPath)
+  })
+
+  it('marks messaging attachment localPath as storedPath for agent-visible non-image files', async () => {
+    const { router, sessionManager } = makeRouter()
+    const txtPath = join(storeDir, 'note.txt')
+    writeFileSync(txtPath, 'hello from chat')
+
+    await router.route(
+      makeFakeAdapter(),
+      baseMsg({
+        text: '',
+        attachments: [
+          {
+            type: 'document',
+            fileId: 'doc-1',
+            fileName: 'note.txt',
+            mimeType: 'text/plain',
+            localPath: txtPath,
+          },
+        ],
+      }),
+    )
+
+    const args = sessionManager.sendMessage.mock.calls[0]!
+    const fileAttachments = args[2] as Array<{
+      name: string
+      text?: string
+      storedPath?: string
+    }>
+    expect(fileAttachments).toHaveLength(1)
+    expect(fileAttachments[0]?.name).toBe('note.txt')
+    expect(fileAttachments[0]?.text).toBe('hello from chat')
+    expect(fileAttachments[0]?.storedPath).toBe(txtPath)
+
+    const storedAttachments = args[3] as Array<{
+      name: string
+      storedPath: string
+    }>
+    expect(storedAttachments).toHaveLength(1)
+    expect(storedAttachments[0]?.name).toBe('note.txt')
+    expect(storedAttachments[0]?.storedPath).toBe(txtPath)
   })
 
   it('drops attachments that have no localPath', async () => {
