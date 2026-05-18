@@ -21,6 +21,10 @@ KILL_PORTS="${CRAFT_WEBUI_KILL_PORTS:-true}"
 SKIP_SUBPROCESS_BUILD="${CRAFT_WEBUI_SKIP_SUBPROCESS_BUILD:-false}"
 BACKEND_TIMEOUT="${CRAFT_WEBUI_BACKEND_TIMEOUT:-30}"
 PREFILL_TOKEN="${CRAFT_WEBUI_PREFILL_TOKEN:-true}"
+ADJUST_INOTIFY="${CRAFT_WEBUI_ADJUST_INOTIFY:-true}"
+MIN_INOTIFY_WATCHES="${CRAFT_WEBUI_MIN_INOTIFY_WATCHES:-524288}"
+MIN_INOTIFY_INSTANCES="${CRAFT_WEBUI_MIN_INOTIFY_INSTANCES:-1024}"
+MIN_INOTIFY_QUEUED_EVENTS="${CRAFT_WEBUI_MIN_INOTIFY_QUEUED_EVENTS:-32768}"
 
 server_pid=""
 webui_pid=""
@@ -82,6 +86,61 @@ is_enabled() {
     1|true|yes|on) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+is_positive_integer() {
+  case "$1" in
+    ''|*[!0-9]*) return 1 ;;
+    *) [ "$1" -gt 0 ] ;;
+  esac
+}
+
+ensure_sysctl_min() {
+  local key="$1"
+  local minimum="$2"
+  local proc_path="/proc/sys/${key//./\/}"
+
+  if ! is_positive_integer "$minimum"; then
+    warn "Ignoring invalid $key minimum: $minimum"
+    return 0
+  fi
+
+  if [ ! -r "$proc_path" ]; then
+    return 0
+  fi
+
+  local current
+  current="$(tr -d '[:space:]' < "$proc_path")"
+  if ! is_positive_integer "$current" || [ "$current" -ge "$minimum" ]; then
+    return 0
+  fi
+
+  if [ "$(id -u)" -ne 0 ]; then
+    warn "$key is $current, below the recommended $minimum for Vite file watching."
+    warn "Run as root or raise it manually: sudo sysctl -w $key=$minimum"
+    return 0
+  fi
+
+  if sysctl -w "$key=$minimum" >/dev/null 2>&1; then
+    info "Raised $key from $current to $minimum for WebUI file watching."
+  else
+    warn "Failed to raise $key from $current to $minimum."
+  fi
+}
+
+ensure_inotify_capacity() {
+  if ! is_enabled "$ADJUST_INOTIFY"; then
+    return 0
+  fi
+
+  case "$(uname -s 2>/dev/null || true)" in
+    Linux) ;;
+    *) return 0 ;;
+  esac
+
+  ensure_sysctl_min fs.inotify.max_user_watches "$MIN_INOTIFY_WATCHES"
+  ensure_sysctl_min fs.inotify.max_user_instances "$MIN_INOTIFY_INSTANCES"
+  ensure_sysctl_min fs.inotify.max_queued_events "$MIN_INOTIFY_QUEUED_EVENTS"
 }
 
 kill_port() {
@@ -302,6 +361,7 @@ if [ -z "${CRAFT_WEBUI_WS_URL:-}" ]; then
 fi
 
 install_deps_if_needed
+ensure_inotify_capacity
 
 if ! is_enabled "$SKIP_SUBPROCESS_BUILD"; then
   info "Building subprocess servers..."
