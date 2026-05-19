@@ -288,6 +288,7 @@ export class Commands {
         undefined,
         msg.threadId,
       )
+      this.sessionManager.notifySessionCreated?.(session.id, this.workspaceId)
 
       const displayName = session.name || session.id
       await adapter.sendText(

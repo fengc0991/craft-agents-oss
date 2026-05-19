@@ -44,6 +44,7 @@ export interface ISessionManager {
   getSessions(workspaceId?: string): Session[]
   getSession(sessionId: string): Promise<Session | null>
   createSession(workspaceId: string, options?: CreateSessionOptions): Promise<Session>
+  notifySessionCreated?(sessionId: string, workspaceId: string): void
   deleteSession(sessionId: string): Promise<void>
 
   // ---------------------------------------------------------------------------

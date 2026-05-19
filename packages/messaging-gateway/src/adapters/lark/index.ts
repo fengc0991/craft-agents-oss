@@ -192,13 +192,60 @@ function shouldFallbackPostToText(err: unknown): boolean {
   return typeof errObj.code === 'number'
 }
 
+interface LarkMention {
+  key?: string
+  id?: { user_id?: string; open_id?: string; union_id?: string }
+  name?: string
+}
+
+function hasMentionBoundary(text: string, key: string): boolean {
+  if (!text.startsWith(key)) return false
+  const next = text.charAt(key.length)
+  return next.length === 0 || /\s/.test(next)
+}
+
+function replaceMentionPlaceholders(text: string, mentions: LarkMention[]): string {
+  let result = text
+  const ordered = mentions
+    .filter((mention): mention is LarkMention & { key: string } =>
+      typeof mention.key === 'string' && mention.key.length > 0)
+    .sort((a, b) => b.key.length - a.key.length)
+  for (const mention of ordered) {
+    const name = mention.name?.trim()
+    if (!name) continue
+    result = result.split(mention.key).join(`@${name}`)
+  }
+  return result
+}
+
 /**
- * Strip a leading `<at user_id="...">…</at> ` prefix from a Lark text message
- * content. Lark prepends the @mention as a literal in the content, but the
- * agent only cares about what comes after.
+ * Strip the leading bot @mention from inbound Lark/Feishu content. Rich text
+ * posts render mentions as `<at ...>`, while text events use placeholders like
+ * `@_user_1` with details in `message.mentions`.
  */
-function stripMentionPrefix(text: string): string {
-  return text.replace(/^<at[^>]*>[^<]*<\/at>\s*/, '').trim()
+function stripMentionPrefix(text: string, mentions: LarkMention[] = []): string {
+  let cleaned = text.trimStart()
+  const withoutRichMention = cleaned.replace(/^<at[^>]*>[^<]*<\/at>\s*/, '')
+  if (withoutRichMention !== cleaned) {
+    return withoutRichMention.trim()
+  }
+
+  const orderedKeys = mentions
+    .map((mention) => mention.key)
+    .filter((key): key is string => typeof key === 'string' && key.length > 0)
+    .sort((a, b) => b.length - a.length)
+  let strippedKnownMention = false
+  for (const key of orderedKeys) {
+    if (!hasMentionBoundary(cleaned, key)) continue
+    cleaned = cleaned.slice(key.length).trimStart()
+    strippedKnownMention = true
+    break
+  }
+
+  if (!strippedKnownMention) {
+    cleaned = cleaned.replace(/^@_user_\d+\s*/, '')
+  }
+  return replaceMentionPlaceholders(cleaned, mentions).trim()
 }
 
 type LarkPostWireBody = {
@@ -387,7 +434,7 @@ interface LarkMessageEvent {
     message_type: string
     content: string
     create_time: string
-    mentions?: Array<{ key: string; id: { user_id?: string }; name: string }>
+    mentions?: LarkMention[]
   }
 }
 
@@ -1064,7 +1111,7 @@ export class LarkAdapter implements PlatformAdapter {
       } else {
         text = extractLarkPostText(message.content)
       }
-      const cleaned = stripMentionPrefix(text)
+      const cleaned = stripMentionPrefix(text, message.mentions ?? [])
       const msg: IncomingMessage = {
         platform: 'lark',
         channelId: message.chat_id,

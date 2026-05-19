@@ -551,6 +551,44 @@ describe('LarkAdapter — static contract', () => {
     )
   })
 
+  it('strips Feishu group @ placeholders from inbound text messages', async () => {
+    const adapter = new LarkAdapter()
+    let resolveSeen!: (msg: IncomingMessage) => void
+    const seen = new Promise<IncomingMessage>((resolve) => {
+      resolveSeen = resolve
+    })
+    adapter.onMessage(async (msg) => {
+      resolveSeen(msg)
+    })
+
+    await (
+      adapter as unknown as {
+        handleIncomingMessage(data: unknown): Promise<void>
+      }
+    ).handleIncomingMessage({
+      sender: { sender_id: { user_id: 'user-1' } },
+      message: {
+        message_id: 'om_group_at_1',
+        chat_id: 'oc_group_1',
+        chat_type: 'group',
+        message_type: 'text',
+        content: JSON.stringify({ text: '@_user_1 /pair 123456' }),
+        mentions: [
+          {
+            key: '@_user_1',
+            id: { user_id: 'ou_bot' },
+            name: 'larkcli0',
+          },
+        ],
+        create_time: String(Date.now()),
+      },
+    })
+
+    const msg = await waitForIncomingMessage(seen)
+    expect(msg.channelId).toBe('oc_group_1')
+    expect(msg.text).toBe('/pair 123456')
+  })
+
   it('accepts inbound post payloads without a locale wrapper', async () => {
     const adapter = new LarkAdapter()
     let resolveSeen!: (msg: IncomingMessage) => void

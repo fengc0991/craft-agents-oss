@@ -122,4 +122,29 @@ describe('Commands', () => {
     expect(adapter.sent[0]).toContain('1. Beta (sess-2)')
     expect(adapter.sent[0]).toContain('/bind <number>')
   })
+
+  it('announces sessions created from chat commands', async () => {
+    const createdSession = makeSession('sess-new', 'Design sync', Date.now())
+    const notifications: Array<{ sessionId: string; workspaceId: string }> = []
+    const sessionManager = {
+      ...makeSessionManager([createdSession]),
+      createSession: async (workspaceId: string, opts?: { name?: string }) => ({
+        ...createdSession,
+        workspaceId,
+        name: opts?.name ?? createdSession.name,
+      }),
+      notifySessionCreated: (sessionId: string, workspaceId: string) => {
+        notifications.push({ sessionId, workspaceId })
+      },
+    } as unknown as ISessionManager
+    const store = makeStore()
+    const commands = new Commands(sessionManager, store, 'ws1')
+    const adapter = makeAdapter('whatsapp', false)
+
+    await commands.handleCommand(adapter, makeMessage('/new Design sync'))
+
+    expect(store.findByChannel('whatsapp', 'chan-1')?.sessionId).toBe('sess-new')
+    expect(notifications).toEqual([{ sessionId: 'sess-new', workspaceId: 'ws1' }])
+    expect(adapter.sent.at(-1)).toContain('Design sync')
+  })
 })

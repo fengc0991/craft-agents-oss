@@ -2705,6 +2705,10 @@ export class SessionManager implements ISessionManager {
     return managedToSession(managed, isBranch ? { messages: managed.messages } : undefined)
   }
 
+  notifySessionCreated(sessionId: string, workspaceId: string): void {
+    this.sendEvent({ type: 'session_created', sessionId }, workspaceId)
+  }
+
   private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
     const sessionId = managed.id
 
