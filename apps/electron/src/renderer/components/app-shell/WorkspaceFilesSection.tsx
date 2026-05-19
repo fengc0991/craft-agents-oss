@@ -8,12 +8,12 @@
 import * as React from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronRight, Copy, FolderOpen, FolderPlus } from 'lucide-react'
+import { ChevronRight, Copy, Download, FolderOpen, FolderPlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import * as storage from '@/lib/local-storage'
 import { FileTree, type FileTreeEntry } from '@/components/files/FileTree'
-import { getFileManagerName } from '@/lib/platform'
+import { getFileManagerName, isWebUI } from '@/lib/platform'
 import type { AppShellContextType } from '@/context/AppShellContext'
 import { Button } from '@/components/ui/button'
 import {
@@ -339,8 +339,8 @@ export function WorkspaceFilesSection({
                 {t("common.copyPath")}
               </StyledContextMenuItem>
               <StyledContextMenuItem onSelect={() => window.electronAPI.showInFolder(workspaceRootPath)}>
-                <FolderOpen className="h-3.5 w-3.5" />
-                {t("chat.showInFileManager", { fileManager: fileManagerName })}
+                {isWebUI ? <Download className="h-3.5 w-3.5" /> : <FolderOpen className="h-3.5 w-3.5" />}
+                {isWebUI ? t("common.download") : t("chat.showInFileManager", { fileManager: fileManagerName })}
               </StyledContextMenuItem>
             </StyledContextMenuContent>
           </ContextMenu>

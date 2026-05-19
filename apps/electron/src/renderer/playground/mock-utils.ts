@@ -267,6 +267,15 @@ export const mockElectronAPI = {
     alert(`Would open file in system editor:\n${path}`)
   },
 
+  downloadPath: async (path: string) => {
+    console.log('[Playground] downloadPath called:', path)
+    return {
+      filename: path.split(/[\\/]/).pop() || 'download',
+      mimeType: 'application/octet-stream',
+      data: new Uint8Array(),
+    }
+  },
+
   showInFolder: async (path: string) => {
     console.log('[Playground] showInFolder called:', path)
     alert(`Would reveal in file manager:\n${path}`)

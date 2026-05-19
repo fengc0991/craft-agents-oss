@@ -18,6 +18,7 @@ import {
   Image,
   FileCode,
   ChevronRight,
+  Download,
   ExternalLink,
   FolderPlus,
   Pencil,
@@ -323,8 +324,8 @@ function FileTreeItem({
           <StyledContextMenuItem
             onSelect={() => onRevealInFileManager(file.path)}
           >
-            <FolderOpen className="h-3.5 w-3.5" />
-            {t("chat.showInFileManager", { fileManager: fileManagerName })}
+            {isWebMode ? <Download className="h-3.5 w-3.5" /> : <FolderOpen className="h-3.5 w-3.5" />}
+            {isWebMode ? t("common.download") : t("chat.showInFileManager", { fileManager: fileManagerName })}
           </StyledContextMenuItem>
           {file.type === 'directory' && onDeleteFolder && (
             <StyledContextMenuSeparator />

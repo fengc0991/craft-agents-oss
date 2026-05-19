@@ -19,11 +19,12 @@ import { useTranslation } from "react-i18next"
 import {
   Trash2,
   FolderOpen,
+  Download,
   AppWindow,
   Send,
 } from 'lucide-react'
 import { useMenuComponents } from '@/components/ui/menu-context'
-import { getFileManagerName } from '@/lib/platform'
+import { getFileManagerName, isWebUI } from '@/lib/platform'
 
 export interface SkillMenuProps {
   /** Skill slug */
@@ -71,8 +72,10 @@ export function SkillMenu({
 
       {/* Show in file manager */}
       <MenuItem onClick={onShowInFinder} disabled={!canShowInFinder}>
-        <FolderOpen className="h-3.5 w-3.5" />
-        <span className="flex-1">{t("sessionMenu.showInFileManager", { fileManager: getFileManagerName() })}</span>
+        {isWebUI ? <Download className="h-3.5 w-3.5" /> : <FolderOpen className="h-3.5 w-3.5" />}
+        <span className="flex-1">
+          {isWebUI ? t("common.download") : t("sessionMenu.showInFileManager", { fileManager: getFileManagerName() })}
+        </span>
       </MenuItem>
 
       {/* Send to another workspace */}

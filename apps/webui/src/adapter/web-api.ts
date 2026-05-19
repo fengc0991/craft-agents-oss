@@ -11,6 +11,7 @@
 import i18n from 'i18next'
 import { toast } from 'sonner'
 import { openExternalUrl } from '@craft-agent/ui'
+import { RPC_CHANNELS, type DownloadPathResult } from '@craft-agent/shared/protocol'
 import { WsRpcClient } from '../../../electron/src/transport/client'
 import { buildClientApi } from '../../../electron/src/transport/build-api'
 import { CHANNEL_MAP } from '../../../electron/src/transport/channel-map'
@@ -50,6 +51,29 @@ const darkMediaQuery = typeof window !== 'undefined'
 
 function getSystemTheme(): boolean {
   return darkMediaQuery?.matches ?? false
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function bytesToBlobPart(data: Uint8Array): BlobPart {
+  return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
+}
+
+function triggerBrowserDownload(result: DownloadPathResult): void {
+  const blob = new Blob([bytesToBlobPart(result.data)], {
+    type: result.mimeType || 'application/octet-stream',
+  })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = result.filename || 'download'
+  link.style.display = 'none'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 // ---------------------------------------------------------------------------
@@ -103,7 +127,15 @@ export function createWebApi(options: WebApiOptions): {
       return Promise.resolve()
     },
     openFile: () => Promise.resolve(), // no-op in browser
-    showInFolder: () => Promise.resolve(), // no-op in browser
+    showInFolder: async (path: string) => {
+      try {
+        const result = await client.invoke(RPC_CHANNELS.file.DOWNLOAD_PATH, path) as DownloadPathResult
+        triggerBrowserDownload(result)
+        toast.success(i18n.t('toast.downloadStarted'), { description: result.filename })
+      } catch (error) {
+        toast.error(i18n.t('toast.failedToDownload'), { description: getErrorMessage(error) })
+      }
+    },
 
     // File dialogs
     openFileDialog: webFilePicker,

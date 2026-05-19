@@ -28,6 +28,7 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { navigate, routes } from '@/lib/navigate'
+import { isWebUI } from '@/lib/platform'
 import { extractLabelId, toggleLabelInList } from '@craft-agent/shared/labels'
 import type { SessionMeta } from '@/atoms/sessions'
 
@@ -42,7 +43,7 @@ export interface SessionMenuActions {
   /** Toggle a label (add if absent, remove all entries with this base ID if present). */
   toggleLabel: (labelId: string) => void
   share: () => Promise<void>
-  showInFinder: () => void
+  showInFinder: () => Promise<void>
   copyPath: () => Promise<void>
   refreshTitle: () => Promise<void>
   openInNewPanel: () => void
@@ -143,9 +144,19 @@ export function useSessionMenuActions({
     }
   }, [sessionId, t])
 
-  const showInFinder = React.useCallback(() => {
-    window.electronAPI.sessionCommand(sessionId, { type: 'showInFinder' })
-  }, [sessionId])
+  const showInFinder = React.useCallback(async () => {
+    if (isWebUI) {
+      const result = await window.electronAPI.sessionCommand(sessionId, { type: 'copyPath' }) as { success: boolean; path?: string } | undefined
+      if (result?.success && result.path) {
+        await window.electronAPI.showInFolder(result.path)
+      } else {
+        toast.error(t('toast.failedToDownload'))
+      }
+      return
+    }
+
+    await window.electronAPI.sessionCommand(sessionId, { type: 'showInFinder' })
+  }, [sessionId, t])
 
   const copyPath = React.useCallback(async () => {
     const result = await window.electronAPI.sessionCommand(sessionId, { type: 'copyPath' }) as { success: boolean; path?: string } | undefined

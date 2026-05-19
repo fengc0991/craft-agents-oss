@@ -13,7 +13,7 @@
 import { useState, useCallback, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { Check, Copy, ExternalLink, FolderOpen, type LucideIcon } from 'lucide-react'
+import { Check, Copy, Download, ExternalLink, FolderOpen, type LucideIcon } from 'lucide-react'
 import { PreviewHeader, PreviewHeaderBadge, type PreviewBadgeVariant } from '../ui/PreviewHeader'
 import {
   DropdownMenu,
@@ -100,8 +100,9 @@ interface FilePathBadgeProps {
  * not re-trigger the in-app preview interceptor.
  */
 function FilePathBadge({ filePath }: FilePathBadgeProps) {
-  const { onOpenFileExternal, onRevealInFinder, fileManagerName } = usePlatform()
-  const revealLabel = `Reveal in ${fileManagerName || 'Finder'}`
+  const { onOpenFileExternal, onRevealInFinder, fileManagerName, revealInFinderLabel, revealInFinderIcon } = usePlatform()
+  const revealLabel = revealInFinderLabel || `Reveal in ${fileManagerName || 'Finder'}`
+  const RevealIcon = revealInFinderIcon === 'download' ? Download : FolderOpen
 
   const handleOpen = useCallback(() => {
     onOpenFileExternal?.(filePath)
@@ -124,7 +125,7 @@ function FilePathBadge({ filePath }: FilePathBadgeProps) {
       )}
       {onRevealInFinder && (
         <StyledDropdownMenuItem onSelect={handleReveal}>
-          <FolderOpen />
+          <RevealIcon />
           {revealLabel}
         </StyledDropdownMenuItem>
       )}
@@ -141,7 +142,7 @@ function FilePathBadge({ filePath }: FilePathBadgeProps) {
       )}
       {onRevealInFinder && (
         <ContextMenu.Item className={contextMenuItemClasses} onSelect={handleReveal}>
-          <FolderOpen />
+          <RevealIcon />
           {revealLabel}
         </ContextMenu.Item>
       )}

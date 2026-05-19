@@ -1,12 +1,14 @@
 import { readFile, writeFile, unlink, mkdir, readdir, stat } from 'fs/promises'
 import { isAbsolute, join, resolve, dirname, parse as parsePath } from 'path'
 import { homedir } from 'os'
+import { gzip } from 'zlib'
+import { promisify } from 'util'
 import { validatePathFormat } from '../../utils/path-validation'
 import { randomUUID } from 'crypto'
-import { RPC_CHANNELS, type FileAttachment, type DirectoryListingResult } from '@craft-agent/shared/protocol'
+import { RPC_CHANNELS, type FileAttachment, type DirectoryListingResult, type DownloadPathResult } from '@craft-agent/shared/protocol'
 import type { StoredAttachment } from '@craft-agent/core/types'
 import { readFileAttachment, validateImageForClaudeAPI, IMAGE_LIMITS } from '@craft-agent/shared/utils'
-import { getSessionAttachmentsPath, validateSessionId } from '@craft-agent/shared/sessions'
+import { getSessionAttachmentsPath, validateSessionId, MAX_BUNDLE_SIZE_BYTES } from '@craft-agent/shared/sessions'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { resizeImageForAPI, inspectImageBuffer } from '@craft-agent/server-core/services'
 import { sanitizeFilename, validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-core/handlers'
@@ -20,6 +22,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.file.READ_DATA_URL,
   RPC_CHANNELS.file.READ_PREVIEW_DATA_URL,
   RPC_CHANNELS.file.READ_BINARY,
+  RPC_CHANNELS.file.DOWNLOAD_PATH,
   RPC_CHANNELS.file.OPEN_DIALOG,
   RPC_CHANNELS.file.READ_ATTACHMENT,
   RPC_CHANNELS.file.READ_USER_ATTACHMENT,
@@ -28,6 +31,162 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.fs.SEARCH,
   RPC_CHANNELS.fs.LIST_DIRECTORY,
 ] as const
+
+const gzipAsync = promisify(gzip)
+
+function getDownloadMimeType(path: string): string {
+  const ext = parsePath(path).ext.toLowerCase()
+  const mimeMap: Record<string, string> = {
+    '.avif': 'image/avif',
+    '.bmp': 'image/bmp',
+    '.css': 'text/css',
+    '.csv': 'text/csv',
+    '.gif': 'image/gif',
+    '.html': 'text/html',
+    '.ico': 'image/x-icon',
+    '.jpeg': 'image/jpeg',
+    '.jpg': 'image/jpeg',
+    '.js': 'text/javascript',
+    '.json': 'application/json',
+    '.md': 'text/markdown',
+    '.pdf': 'application/pdf',
+    '.png': 'image/png',
+    '.svg': 'image/svg+xml',
+    '.txt': 'text/plain',
+    '.webp': 'image/webp',
+    '.xml': 'application/xml',
+    '.yaml': 'application/yaml',
+    '.yml': 'application/yaml',
+    '.zip': 'application/zip',
+  }
+  return mimeMap[ext] ?? 'application/octet-stream'
+}
+
+function tarPathFor(rootName: string, relativePath: string): string {
+  return `${rootName}/${relativePath}`.replace(/\\/g, '/')
+}
+
+function splitTarPath(path: string): { name: string; prefix: string } {
+  if (Buffer.byteLength(path) <= 100) {
+    return { name: path, prefix: '' }
+  }
+
+  const parts = path.split('/')
+  for (let i = 1; i < parts.length; i += 1) {
+    const prefix = parts.slice(0, i).join('/')
+    const name = parts.slice(i).join('/')
+    if (Buffer.byteLength(prefix) <= 155 && Buffer.byteLength(name) <= 100) {
+      return { name, prefix }
+    }
+  }
+
+  throw new Error(`Path is too long to archive: ${path}`)
+}
+
+function writeTarString(header: Buffer, value: string, offset: number, length: number): void {
+  const bytes = Buffer.from(value)
+  bytes.copy(header, offset, 0, Math.min(bytes.length, length))
+}
+
+function writeTarOctal(header: Buffer, value: number, offset: number, length: number): void {
+  const text = Math.floor(value).toString(8).padStart(length - 1, '0').slice(-(length - 1))
+  writeTarString(header, `${text}\0`, offset, length)
+}
+
+function createTarHeader(
+  path: string,
+  size: number,
+  mode: number,
+  mtimeMs: number,
+  typeflag: '0' | '5' = '0',
+): Buffer {
+  const header = Buffer.alloc(512)
+  const { name, prefix } = splitTarPath(path)
+
+  writeTarString(header, name, 0, 100)
+  writeTarOctal(header, mode & 0o777, 100, 8)
+  writeTarOctal(header, 0, 108, 8)
+  writeTarOctal(header, 0, 116, 8)
+  writeTarOctal(header, size, 124, 12)
+  writeTarOctal(header, Math.floor(mtimeMs / 1000), 136, 12)
+  header.fill(0x20, 148, 156)
+  writeTarString(header, typeflag, 156, 1)
+  writeTarString(header, 'ustar\0', 257, 6)
+  writeTarString(header, '00', 263, 2)
+  writeTarString(header, prefix, 345, 155)
+
+  let checksum = 0
+  for (const byte of header) checksum += byte
+  writeTarString(header, `${checksum.toString(8).padStart(6, '0')}\0 `, 148, 8)
+
+  return header
+}
+
+function tarPadding(size: number): Buffer {
+  const remainder = size % 512
+  return remainder === 0 ? Buffer.alloc(0) : Buffer.alloc(512 - remainder)
+}
+
+async function collectDirectoryForTar(
+  rootPath: string,
+  rootName: string,
+  allowedDirs: string[],
+): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  let totalSize = 0
+
+  const rootInfo = await stat(rootPath)
+  chunks.push(createTarHeader(`${rootName}/`, 0, rootInfo.mode, rootInfo.mtimeMs, '5'))
+
+  const walk = async (currentDir: string, relativeDir: string): Promise<void> => {
+    const entries = (await readdir(currentDir, { withFileTypes: true }))
+      .filter((entry) => !entry.name.startsWith('.'))
+      .sort((a, b) => a.name.localeCompare(b.name))
+
+    for (const entry of entries) {
+      const absolutePath = join(currentDir, entry.name)
+      const relativePath = relativeDir ? `${relativeDir}/${entry.name}` : entry.name
+
+      if (entry.isDirectory()) {
+        let safeChildPath: string
+        try {
+          safeChildPath = await validateFilePath(absolutePath, allowedDirs)
+        } catch {
+          continue
+        }
+        const info = await stat(safeChildPath)
+        chunks.push(createTarHeader(tarPathFor(rootName, `${relativePath}/`), 0, info.mode, info.mtimeMs, '5'))
+        await walk(safeChildPath, relativePath)
+        continue
+      }
+
+      if (!entry.isFile()) continue
+
+      let safeChildPath: string
+      try {
+        safeChildPath = await validateFilePath(absolutePath, allowedDirs)
+      } catch {
+        continue
+      }
+
+      const info = await stat(safeChildPath)
+      totalSize += info.size
+      if (totalSize > MAX_BUNDLE_SIZE_BYTES) {
+        throw new Error(`Download exceeds ${Math.round(MAX_BUNDLE_SIZE_BYTES / 1024 / 1024)}MB limit`)
+      }
+
+      const data = await readFile(safeChildPath)
+      const archivePath = tarPathFor(rootName, relativePath)
+      chunks.push(createTarHeader(archivePath, data.length, info.mode, info.mtimeMs))
+      chunks.push(data)
+      chunks.push(tarPadding(data.length))
+    }
+  }
+
+  await walk(rootPath, '')
+  chunks.push(Buffer.alloc(1024))
+  return Buffer.concat(chunks)
+}
 
 export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): void {
   // Read a file (with path validation to prevent traversal attacks)
@@ -114,6 +273,47 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
       const message = error instanceof Error ? error.message : 'Unknown error'
       deps.platform.logger.error('readFileBinary error:', message)
       throw new Error(`Failed to read file as binary: ${message}`)
+    }
+  })
+
+  // Prepare a file or directory for browser download.
+  // Files are returned as-is. Directories are streamed back as a gzip-compressed tar archive.
+  server.handle(RPC_CHANNELS.file.DOWNLOAD_PATH, async (ctx, path: string): Promise<DownloadPathResult> => {
+    try {
+      const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
+      const allowedDirs = getWorkspaceAllowedDirs(workspaceId)
+      const safePath = await validateFilePath(path, allowedDirs)
+      const info = await stat(safePath)
+
+      if (info.isDirectory()) {
+        const baseName = sanitizeFilename(parsePath(safePath).base || 'download')
+        const tarBuffer = await collectDirectoryForTar(safePath, baseName, allowedDirs)
+        const gzipped = await gzipAsync(tarBuffer)
+        return {
+          filename: `${baseName}.tar.gz`,
+          mimeType: 'application/gzip',
+          data: new Uint8Array(gzipped),
+        }
+      }
+
+      if (!info.isFile()) {
+        throw new Error('Only regular files and directories can be downloaded')
+      }
+
+      if (info.size > MAX_BUNDLE_SIZE_BYTES) {
+        throw new Error(`Download exceeds ${Math.round(MAX_BUNDLE_SIZE_BYTES / 1024 / 1024)}MB limit`)
+      }
+
+      const buffer = await readFile(safePath)
+      return {
+        filename: sanitizeFilename(parsePath(safePath).base || 'download'),
+        mimeType: getDownloadMimeType(safePath),
+        data: new Uint8Array(buffer),
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      deps.platform.logger.error('downloadPath error:', path, message)
+      throw new Error(`Failed to prepare download: ${message}`)
     }
   })
 

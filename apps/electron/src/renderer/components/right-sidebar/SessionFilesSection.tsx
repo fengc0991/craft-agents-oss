@@ -18,7 +18,7 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useState, useEffect, useCallback, useRef, memo } from 'react'
 import { AnimatePresence, motion, type Variants } from 'motion/react'
-import { File, Folder, FolderOpen, FileText, Image, FileCode, ChevronRight, ExternalLink } from 'lucide-react'
+import { File, Folder, FolderOpen, FileText, Image, FileCode, ChevronRight, Download, ExternalLink } from 'lucide-react'
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -359,8 +359,8 @@ function FileTreeItem({
           <StyledContextMenuItem
             onSelect={() => onRevealInFileManager(file.path)}
           >
-            <FolderOpen className="h-3.5 w-3.5" />
-            {t("chat.showInFileManager", { fileManager: fileManagerName })}
+            {isWebMode ? <Download className="h-3.5 w-3.5" /> : <FolderOpen className="h-3.5 w-3.5" />}
+            {isWebMode ? t("common.download") : t("chat.showInFileManager", { fileManager: fileManagerName })}
           </StyledContextMenuItem>
         </StyledContextMenuContent>
       </ContextMenu>
@@ -583,7 +583,7 @@ export function SessionFilesSection({ sessionId, className, sessionFolderPath, h
               onClick={() => window.electronAPI.showInFolder(sessionFolderPath)}
               className="text-xs text-foreground/50 hover:text-foreground/80 hover:underline underline-offset-2 transition-colors"
             >
-              {t("chat.viewInFileManager", { fileManager: fileManagerName })}
+              {isWebMode ? t("common.download") : t("chat.viewInFileManager", { fileManager: fileManagerName })}
             </button>
           )}
         </div>

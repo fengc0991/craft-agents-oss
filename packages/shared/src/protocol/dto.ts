@@ -218,6 +218,16 @@ export interface SendMessageOptions {
 }
 
 // ---------------------------------------------------------------------------
+// File download
+// ---------------------------------------------------------------------------
+
+export interface DownloadPathResult {
+  filename: string
+  mimeType: string
+  data: Uint8Array
+}
+
+// ---------------------------------------------------------------------------
 // Session commands (consolidated operations)
 // ---------------------------------------------------------------------------
 

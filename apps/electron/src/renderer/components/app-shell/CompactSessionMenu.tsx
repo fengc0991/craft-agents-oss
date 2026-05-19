@@ -40,6 +40,7 @@ import {
   Flag,
   FlagOff,
   FolderOpen,
+  Download,
   Globe,
   Link2Off,
   MailOpen,
@@ -74,7 +75,7 @@ import {
 } from '@/config/session-status-config'
 import type { SessionMeta } from '@/atoms/sessions'
 import { getSessionStatus, hasUnreadMeta, hasMessagesMeta } from '@/utils/session'
-import { getFileManagerName } from '@/lib/platform'
+import { getFileManagerName, isWebUI } from '@/lib/platform'
 import { useMessagingConnect, type MessagingPlatform } from '@/components/messaging/MessagingSessionMenuItem'
 import { useSessionMenuActions } from '@/hooks/useSessionMenuActions'
 
@@ -465,8 +466,8 @@ function RootPane({
         <Row icon={<AppWindow className="h-4 w-4" />} label={t('sessionMenu.openInNewWindow')} onTap={onOpenInNewWindow} />
       )}
       <Row
-        icon={<FolderOpen className="h-4 w-4" />}
-        label={t('sessionMenu.showInFileManager', { fileManager: getFileManagerName() })}
+        icon={isWebUI ? <Download className="h-4 w-4" /> : <FolderOpen className="h-4 w-4" />}
+        label={isWebUI ? t('common.download') : t('sessionMenu.showInFileManager', { fileManager: getFileManagerName() })}
         onTap={onShowInFinder}
       />
       <Row icon={<Copy className="h-4 w-4" />} label={t('sessionMenu.copyPath')} onTap={onCopyPath} />

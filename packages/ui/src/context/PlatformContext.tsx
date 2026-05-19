@@ -96,9 +96,19 @@ export interface PlatformActions {
 
   /**
    * Reveal a file in the system file manager (Electron: shell.showItemInFolder)
-   * Web: Not available (menu items hidden when undefined)
+   * Web: May download the file or archived directory.
    */
   onRevealInFinder?: (path: string) => void
+
+  /**
+   * Label for the reveal/download action. Defaults to "Reveal in {fileManagerName}".
+   */
+  revealInFinderLabel?: string
+
+  /**
+   * Icon variant for the reveal/download action.
+   */
+  revealInFinderIcon?: 'folder' | 'download'
 
   /**
    * Platform-specific file manager name for display labels.

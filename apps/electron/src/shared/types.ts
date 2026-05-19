@@ -211,6 +211,7 @@ import type {
   DirectoryListingResult,
   RemoteSessionTransferPayload,
   ImportRemoteSessionTransferResult,
+  DownloadPathResult,
 } from '@craft-agent/shared/protocol'
 
 export interface ElectronAPI {
@@ -302,6 +303,8 @@ export interface ElectronAPI {
   readFile(path: string): Promise<string>
   /** Read a file as binary data (Uint8Array) */
   readFileBinary(path: string): Promise<Uint8Array>
+  /** Read a file or archived directory payload for browser download. */
+  downloadPath(path: string): Promise<DownloadPathResult>
   /** Read a file as a data URL (data:{mime};base64,...) for binary preview (images, PDFs) */
   readFileDataUrl(path: string): Promise<string>
   /** Read an image file as a size-bounded preview data URL for lightweight thumbnail rendering. */

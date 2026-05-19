@@ -23,6 +23,7 @@ import {
   FlagOff,
   MailOpen,
   FolderOpen,
+  Download,
   Copy,
   AppWindow,
   Columns2,
@@ -36,7 +37,7 @@ import { getStateColor, getStateIcon, type SessionStatusId } from '@/config/sess
 import type { SessionStatus } from '@/config/session-status-config'
 import type { LabelConfig } from '@craft-agent/shared/labels'
 import { LabelMenuItems, StatusMenuItems, ShareMenuItems } from './SessionMenuParts'
-import { getFileManagerName } from '@/lib/platform'
+import { getFileManagerName, isWebUI } from '@/lib/platform'
 import type { SessionMeta } from '@/atoms/sessions'
 import { getSessionStatus, hasUnreadMeta, hasMessagesMeta } from '@/utils/session'
 import { MessagingSessionMenuItem } from '@/components/messaging/MessagingSessionMenuItem'
@@ -252,8 +253,10 @@ export function SessionMenu({
 
       {/* Show in file manager */}
       <MenuItem onClick={actions.showInFinder}>
-        <FolderOpen className="h-3.5 w-3.5" />
-        <span className="flex-1">{t("sessionMenu.showInFileManager", { fileManager: getFileManagerName() })}</span>
+        {isWebUI ? <Download className="h-3.5 w-3.5" /> : <FolderOpen className="h-3.5 w-3.5" />}
+        <span className="flex-1">
+          {isWebUI ? t("common.download") : t("sessionMenu.showInFileManager", { fileManager: getFileManagerName() })}
+        </span>
       </MenuItem>
 
       {/* Copy Path */}
