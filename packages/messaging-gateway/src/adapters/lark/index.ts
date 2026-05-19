@@ -201,6 +201,126 @@ function stripMentionPrefix(text: string): string {
   return text.replace(/^<at[^>]*>[^<]*<\/at>\s*/, '').trim()
 }
 
+type LarkPostWireBody = {
+  title?: unknown
+  content?: unknown
+}
+
+type LarkPostWireElement = {
+  tag?: unknown
+  text?: unknown
+  href?: unknown
+  user_id?: unknown
+  user_name?: unknown
+  image_key?: unknown
+  file_key?: unknown
+  language?: unknown
+}
+
+const LARK_POST_LOCALES = ['zh_cn', 'en_us'] as const
+
+function parseJsonObject(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null
+  } catch {
+    return null
+  }
+}
+
+function getLarkPostBody(parsed: Record<string, unknown>): LarkPostWireBody | null {
+  if (Array.isArray(parsed.content)) return parsed
+
+  for (const locale of LARK_POST_LOCALES) {
+    const candidate = parsed[locale]
+    if (
+      candidate &&
+      typeof candidate === 'object' &&
+      !Array.isArray(candidate) &&
+      Array.isArray((candidate as LarkPostWireBody).content)
+    ) {
+      return candidate as LarkPostWireBody
+    }
+  }
+
+  for (const value of Object.values(parsed)) {
+    if (
+      value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      Array.isArray((value as LarkPostWireBody).content)
+    ) {
+      return value as LarkPostWireBody
+    }
+  }
+
+  return null
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
+function renderLarkPostElement(el: unknown): string {
+  if (!el || typeof el !== 'object' || Array.isArray(el)) return ''
+  const element = el as LarkPostWireElement
+  const tag = stringValue(element.tag)
+  const text = stringValue(element.text)
+
+  switch (tag) {
+    case 'text':
+    case 'md':
+      return text
+    case 'a':
+      return text || stringValue(element.href)
+    case 'at': {
+      const userId = stringValue(element.user_id)
+      const name = stringValue(element.user_name) || text
+      if (userId === 'all' || userId === 'all_members') return '@all'
+      return userId
+        ? `<at user_id="${userId}">${name}</at>`
+        : name
+    }
+    case 'code_block': {
+      const language = stringValue(element.language)
+      return `\`\`\`${language}\n${text}\n\`\`\``
+    }
+    case 'img':
+      return stringValue(element.image_key) ? '[image]' : ''
+    case 'media':
+      return stringValue(element.file_key) ? '[media]' : ''
+    case 'hr':
+      return '---'
+    default:
+      return text
+  }
+}
+
+function extractLarkPostText(rawContent: string): string {
+  const parsed = parseJsonObject(rawContent)
+  if (!parsed) return ''
+  const body = getLarkPostBody(parsed)
+  if (!body) return ''
+
+  const lines: string[] = []
+  const title = stringValue(body.title)
+  if (title.length > 0) {
+    lines.push(title)
+    lines.push('')
+  }
+
+  const content = Array.isArray(body.content) ? body.content : []
+  for (const paragraph of content) {
+    if (!Array.isArray(paragraph)) continue
+    const line = paragraph.map(renderLarkPostElement).join('')
+    lines.push(line)
+  }
+
+  return lines.join('\n').trim()
+}
+
 /**
  * Narrow projection over the SDK's `Client` for the methods we actually call.
  * The SDK's full type union is enormous (~250k lines) and changes shape between
@@ -932,17 +1052,17 @@ export class LarkAdapter implements PlatformAdapter {
     const senderId =
       sender.sender_id?.user_id ?? sender.sender_id?.open_id ?? sender.sender_id?.union_id ?? ''
 
-    // Phase 2: support text + image + file. Other types (audio/video/sticker/etc.)
+    // Phase 2: support text/post + image + file. Other types (audio/video/sticker/etc.)
     // are dropped with an info log so users can see the bot received the event
     // but can't process it.
-    if (message.message_type === 'text') {
+    if (message.message_type === 'text' || message.message_type === 'post') {
       this.acknowledgeInboundMessage(message.message_id)
       let text: string
-      try {
-        const parsed = JSON.parse(message.content) as { text?: string }
-        text = parsed.text ?? ''
-      } catch {
-        text = ''
+      if (message.message_type === 'text') {
+        const parsed = parseJsonObject(message.content) as { text?: unknown } | null
+        text = stringValue(parsed?.text)
+      } else {
+        text = extractLarkPostText(message.content)
       }
       const cleaned = stripMentionPrefix(text)
       const msg: IncomingMessage = {

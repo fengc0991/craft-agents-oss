@@ -497,6 +497,93 @@ describe('LarkAdapter — static contract', () => {
     await call
   })
 
+  it('converts inbound rich-text post messages to plain text and routes them', async () => {
+    const adapter = new LarkAdapter()
+    installFakeLarkClient(adapter)
+    let resolveSeen!: (msg: IncomingMessage) => void
+    const seen = new Promise<IncomingMessage>((resolve) => {
+      resolveSeen = resolve
+    })
+    adapter.onMessage(async (msg) => {
+      resolveSeen(msg)
+    })
+
+    await (
+      adapter as unknown as {
+        handleIncomingMessage(data: unknown): Promise<void>
+      }
+    ).handleIncomingMessage({
+      sender: { sender_id: { user_id: 'user-1' } },
+      message: {
+        message_id: 'om_post_1',
+        chat_id: 'oc_1',
+        chat_type: 'p2p',
+        message_type: 'post',
+        content: JSON.stringify({
+          zh_cn: {
+            title: '',
+            content: [
+              [
+                { tag: 'at', user_id: 'ou_bot', user_name: 'Craft Agent' },
+                { tag: 'text', text: ' 请修复这个问题' },
+              ],
+              [
+                {
+                  tag: 'code_block',
+                  language: 'text',
+                  text: 'event: "lark_unsupported_msg_type"',
+                },
+              ],
+              [
+                { tag: 'text', text: '日志：' },
+                { tag: 'a', text: 'trace', href: 'https://example.com/trace' },
+              ],
+            ],
+          },
+        }),
+        create_time: String(Date.now()),
+      },
+    })
+
+    const msg = await waitForIncomingMessage(seen)
+    expect(msg.text).toBe(
+      '请修复这个问题\n```text\nevent: "lark_unsupported_msg_type"\n```\n日志：trace',
+    )
+  })
+
+  it('accepts inbound post payloads without a locale wrapper', async () => {
+    const adapter = new LarkAdapter()
+    let resolveSeen!: (msg: IncomingMessage) => void
+    const seen = new Promise<IncomingMessage>((resolve) => {
+      resolveSeen = resolve
+    })
+    adapter.onMessage(async (msg) => {
+      resolveSeen(msg)
+    })
+
+    await (
+      adapter as unknown as {
+        handleIncomingMessage(data: unknown): Promise<void>
+      }
+    ).handleIncomingMessage({
+      sender: { sender_id: { user_id: 'user-1' } },
+      message: {
+        message_id: 'om_post_2',
+        chat_id: 'oc_1',
+        chat_type: 'p2p',
+        message_type: 'post',
+        content: JSON.stringify({
+          title: '标题',
+          content: [[{ tag: 'text', text: '正文' }]],
+        }),
+        create_time: String(Date.now()),
+      },
+    })
+
+    const msg = await waitForIncomingMessage(seen)
+    expect(msg.text).toBe('标题\n\n正文')
+  })
+
   it('downloads inbound file messages through Lark messageResource and emits localPath attachments', async () => {
     const adapter = new LarkAdapter()
     const calls = installFakeLarkResourceClient(adapter, Buffer.from('# hello from feishu'))
