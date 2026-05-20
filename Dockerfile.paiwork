@@ -36,7 +36,12 @@ COPY apps/cli/package.json apps/cli/
 COPY apps/viewer/package.json apps/viewer/
 COPY apps/webui/package.json apps/webui/
 
-RUN bun install --frozen-lockfile
+ENV npm_config_registry=https://registry.npmmirror.com
+ENV BUN_CONFIG_REGISTRY=https://registry.npmmirror.com
+ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
+ENV SENTRYCLI_SKIP_DOWNLOAD=1
+
+RUN bun install --frozen-lockfile --ignore-scripts --registry=https://registry.npmmirror.com
 
 COPY . .
 COPY deploy/paiwork/seed/.craft-agent /seed/.craft-agent
