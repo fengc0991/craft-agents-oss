@@ -1,7 +1,7 @@
 # PaiWork Intranet Deployment
 
 This deploys Craft Agents WebUI/server with only the `paiwork` workspace exposed.
-The Kubernetes Service uses NodePort `30101`.
+The Kubernetes Service uses NodePort `30102`.
 
 ## Local Build
 
@@ -50,7 +50,7 @@ deploy/paiwork/k8s/rendered.yaml
 Health check:
 
 ```bash
-BASE_URL=http://<intranet-node-ip>:30101 bash deploy/paiwork/scripts/smoke.sh
+BASE_URL=http://<intranet-node-ip>:30102 bash deploy/paiwork/scripts/smoke.sh
 ```
 
 ## Jenkins API Automation

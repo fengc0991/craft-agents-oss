@@ -11,7 +11,7 @@ export NAMESPACE="${NAMESPACE:-rabyte-data-pre-data}"
 export IMAGE
 export IMAGE_PULL_POLICY="${IMAGE_PULL_POLICY:-IfNotPresent}"
 export PVC_SIZE="${PVC_SIZE:-20Gi}"
-export NODE_PORT="${NODE_PORT:-30101}"
+export NODE_PORT="${NODE_PORT:-30102}"
 export CPU_REQUEST="${CPU_REQUEST:-500m}"
 export MEMORY_REQUEST="${MEMORY_REQUEST:-1Gi}"
 export CPU_LIMIT="${CPU_LIMIT:-4}"
