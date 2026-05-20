@@ -16,6 +16,7 @@ if [ ! -d "$SOURCE_HOME/workspaces/$WORKSPACE_SLUG" ]; then
   exit 1
 fi
 
+rm -rf "$DEST/workspaces/$WORKSPACE_SLUG"
 mkdir -p "$DEST/workspaces/$WORKSPACE_SLUG"
 
 jq --arg slug "$WORKSPACE_SLUG" '
@@ -26,8 +27,13 @@ jq --arg slug "$WORKSPACE_SLUG" '
 
 rsync -a --delete \
   --exclude 'skills/paiwork-observability/.paiobs.env' \
+  --exclude 'skills/paiwork-observability/.lark-cli-home' \
   --exclude 'skills/paiwork-observability/.local-lark-cli/node_modules' \
   --exclude 'skills/paiwork-observability/.local-lark-cli/lib/node_modules' \
+  --exclude 'sessions' \
+  --exclude 'events.jsonl' \
+  --exclude '*.csv' \
+  --exclude 'test_refs.txt' \
   --exclude '__pycache__' \
   --exclude '*.pyc' \
   --exclude '.server.lock' \
@@ -36,7 +42,8 @@ rsync -a --delete \
   "$DEST/workspaces/$WORKSPACE_SLUG/"
 
 find "$DEST" -type f \( -name '.paiobs.env' -o -name 'credentials.enc' -o -name '.server.lock' -o -name '*.pyc' \) -delete
-find "$DEST" -type d \( -name node_modules -o -name __pycache__ \) -prune -exec rm -rf {} +
+find "$DEST" -type d \( -name node_modules -o -name __pycache__ -o -name .lark-cli-home \) -prune -exec rm -rf {} +
+mkdir -p "$DEST/workspaces/$WORKSPACE_SLUG/sessions"
 
 echo "Seed ready: $DEST"
 jq '{activeWorkspaceId, activeSessionId, workspaces}' "$DEST/config.json"

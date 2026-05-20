@@ -1,0 +1,111 @@
+{
+  "workspaces": [
+    {
+      "name": "paiwork",
+      "rootPath": "~/.craft-agent/workspaces/paiwork",
+      "slug": "paiwork",
+      "id": "220a4139-d434-8a25-812f-995b1f6b2efb",
+      "createdAt": 1779179753715
+    }
+  ],
+  "activeWorkspaceId": "220a4139-d434-8a25-812f-995b1f6b2efb",
+  "activeSessionId": null,
+  "llmConnections": [
+    {
+      "slug": "pi-api-key",
+      "name": "Sealos LLM Gateway",
+      "providerType": "pi_compat",
+      "authType": "api_key_with_endpoint",
+      "models": [
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "claude-opus-4-7",
+        "claude-sonnet-4-6",
+        "gpt-5.5",
+        "gpt-5.4",
+        "gemini-3.1-pro-preview",
+        "gemini-3-pro-preview",
+        "kimi-k2.6",
+        "kimi-k2.5",
+        "glm-5.1",
+        "Pro/zai-org/GLM-5.1",
+        "mimo-v2.5-pro",
+        "mimo-v2.5",
+        "grok-4.2-thinking",
+        "qwen3-max-2026-01-23",
+        "qwen3.5-397b-a17b",
+        "doubao-seed-2-0-pro-260215",
+        "MiniMax-M2.7",
+        "hy3-preview"
+      ],
+      "defaultModel": "deepseek-v4-pro",
+      "modelSelectionMode": "userDefined3Tier",
+      "piAuthProvider": "openai",
+      "createdAt": 1777975567844,
+      "baseUrl": "https://ielszlfs.sealoshzh.site/v1",
+      "customEndpoint": {
+        "api": "openai-completions"
+      },
+      "midStreamBehavior": "steer"
+    },
+    {
+      "slug": "rabyte-llm",
+      "name": "Rabyte LLM Gateway",
+      "providerType": "pi_compat",
+      "authType": "api_key_with_endpoint",
+      "createdAt": 1779240329230,
+      "baseUrl": "https://test-llm.rabyte.cn",
+      "models": [
+        "wangsu-claude-opus-4-6",
+        "wangsu-claude-opus-4-7",
+        "wangsu-claude-sonnet-4-6",
+        "ucloud-claude-opus-4-6",
+        "rabyte-claude-opus-4-6",
+        "openrouter-claude-opus-4.6",
+        "openrouter-deepseek-v4-pro",
+        "openrouter-deepseek-v4-flash",
+        "volcengine-deepseek-v3.2",
+        "volcengine-deepseek-v3.2-thinking",
+        "road-gpt-5.5",
+        "road-gpt-5.4",
+        "openai-gpt-5.5",
+        "openai-gpt-5.4",
+        "openrouter-gpt-5.4-pro",
+        "tencent-gpt-5.4",
+        "wangsu-gpt-5.5",
+        "road-gemini-3.1-pro-preview",
+        "road-gemini-3-pro-preview",
+        "road-gemini-3-flash-preview",
+        "road-gemini-3.1-flash-lite-preview",
+        "openrouter-gemini-3-pro-preview",
+        "openrouter-gemini-3.1-flash-lite-preview",
+        "rabyte-gemini-3.1-pro-preview",
+        "kimi-k2.6-thinking",
+        "kimi-k2.6",
+        "kimi-k2.5-thinking",
+        "kimi-k2.5",
+        "kimi-k2-turbo",
+        "glm-5.1-thinking",
+        "glm-5.1",
+        "openrouter-mimo-v2.5-pro",
+        "openrouter-mimo-v2.5",
+        "qwen3-max-2026-01-23",
+        "qwen3.5-397b-a17b",
+        "minimax-m2.7"
+      ],
+      "defaultModel": "wangsu-claude-opus-4-6",
+      "modelSelectionMode": "userDefined3Tier",
+      "piAuthProvider": "openai",
+      "customEndpoint": {
+        "api": "openai-completions"
+      },
+      "midStreamBehavior": "steer"
+    }
+  ],
+  "defaultLlmConnection": "rabyte-llm",
+  "migrationsApplied": [
+    "opus-4-6-restored"
+  ],
+  "defaultThinkingLevel": "medium",
+  "setupDeferred": true
+}

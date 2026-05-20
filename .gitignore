@@ -57,6 +57,8 @@ pnpm-lock.yaml
 
 # Craft Agent local data (sessions, credentials, config)
 .craft-agent/
+!deploy/paiwork/seed/.craft-agent/
+!deploy/paiwork/seed/.craft-agent/**
 
 # SSH keys and secrets
 *.pem

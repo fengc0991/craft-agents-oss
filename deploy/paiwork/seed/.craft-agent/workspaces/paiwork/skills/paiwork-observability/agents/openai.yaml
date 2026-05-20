@@ -1,0 +1,4 @@
+interface:
+  display_name: "PaiWork Observability"
+  short_description: "PaiWork API observability toolkit"
+  default_prompt: "Use $paiwork-observability to inspect PaiWork history through the internal observability API."

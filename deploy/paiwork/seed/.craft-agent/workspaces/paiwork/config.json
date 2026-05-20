@@ -1,0 +1,18 @@
+{
+  "id": "ws_463b6e6d",
+  "name": "paiwork",
+  "slug": "paiwork",
+  "defaults": {
+    "permissionMode": "allow-all",
+    "cyclablePermissionModes": [
+      "safe",
+      "allow-all"
+    ],
+    "enabledSourceSlugs": []
+  },
+  "localMcpServers": {
+    "enabled": true
+  },
+  "createdAt": 1779179753715,
+  "updatedAt": 1779186511685
+}

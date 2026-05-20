@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+export LARK_CLI_HOME="${LARK_CLI_HOME:-${SKILL_DIR}/.lark-cli-home}"
+export HOME="${LARK_CLI_HOME}"
+mkdir -p "${HOME}"
+
+exec "${SKILL_DIR}/.local-lark-cli/bin/lark-cli" "$@"

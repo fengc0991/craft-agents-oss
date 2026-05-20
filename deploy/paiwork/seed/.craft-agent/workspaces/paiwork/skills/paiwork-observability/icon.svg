@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="PaiWork Observability">
+  <rect width="64" height="64" rx="14" fill="#102033"/>
+  <path d="M12 40c5.6-10.7 12.3-16 20-16s14.4 5.3 20 16c-5.6 7.3-12.3 11-20 11s-14.4-3.7-20-11z" fill="#dff7ff"/>
+  <circle cx="32" cy="38" r="8" fill="#14b8a6"/>
+  <circle cx="32" cy="38" r="3.5" fill="#102033"/>
+  <path d="M16 21h8l4 8 7-16 5 10h8" fill="none" stroke="#f5c542" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
