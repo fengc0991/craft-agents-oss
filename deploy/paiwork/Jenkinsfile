@@ -1,121 +1,117 @@
-pipeline {
-  agent any
+properties([
+  disableConcurrentBuilds(),
+  parameters([
+    string(name: 'IMAGE_REGISTRY', defaultValue: 'ops-harbor.rabyte.cn/rabyte-data/rabyte-pre/pre/craft-agents-paiwork', description: 'Image repository without tag', trim: true),
+    string(name: 'IMAGE_TAG', defaultValue: '', description: 'Optional image tag. Defaults to BUILD_NUMBER', trim: true),
+    password(name: 'CRAFT_WEBUI_PASSWORD', defaultValue: '', description: 'Required WebUI login password'),
+    password(name: 'CRAFT_SERVER_TOKEN', defaultValue: '', description: 'Optional server token. Leave empty to auto-generate'),
+    password(name: 'RABYTE_LLM_API_KEY', defaultValue: '', description: 'Optional Rabyte LLM API key'),
+    password(name: 'SEALOS_LLM_API_KEY', defaultValue: '', description: 'Optional Sealos LLM API key'),
+    password(name: 'PAI_OBS_API_KEY', defaultValue: '', description: 'Optional PaiWork observability API key'),
+    string(name: 'PAI_OBS_BASE_URL', defaultValue: 'http://192.168.15.57:30100', description: 'PaiWork observability gateway URL', trim: true),
+  ])
+])
 
-  parameters {
-    string(name: 'IMAGE_REGISTRY', defaultValue: 'ops-harbor.rabyte.cn/rabyte-data/rabyte-pre/pre/craft-agents-paiwork', description: 'Image repository without tag')
-    string(name: 'IMAGE_TAG', defaultValue: '', description: 'Optional image tag. Defaults to BUILD_NUMBER')
-    password(name: 'CRAFT_WEBUI_PASSWORD', defaultValue: '', description: 'Required WebUI login password')
-    password(name: 'CRAFT_SERVER_TOKEN', defaultValue: '', description: 'Optional server token. Leave empty to auto-generate')
-    password(name: 'RABYTE_LLM_API_KEY', defaultValue: '', description: 'Optional Rabyte LLM API key')
-    password(name: 'SEALOS_LLM_API_KEY', defaultValue: '', description: 'Optional Sealos LLM API key')
-    password(name: 'PAI_OBS_API_KEY', defaultValue: '', description: 'Optional PaiWork observability API key')
-    string(name: 'PAI_OBS_BASE_URL', defaultValue: 'http://192.168.15.57:30100', description: 'PaiWork observability gateway URL')
-  }
+node {
+  timestamps {
+    env.DOCKER_BUILDKIT = '1'
+    env.K8S_CONTEXT = 'test-saas-acs-new'
+    env.K8S_NAMESPACE = 'rabyte-data-pre-data'
+    env.K8S_DEPLOYMENT = 'craft-agents-paiwork'
+    env.HARBOR_CREDENTIALS_ID = 'harbor-ops'
+    env.KUBECONFIG_CREDENTIALS_ID = 'test-k8s-kubeconfig'
 
-  environment {
-    DOCKER_BUILDKIT = '1'
-    K8S_CONTEXT = 'test-saas-acs-new'
-    K8S_NAMESPACE = 'rabyte-data-pre-data'
-    K8S_DEPLOYMENT = 'craft-agents-paiwork'
-    HARBOR_CREDENTIALS_ID = 'harbor-ops'
-    KUBECONFIG_CREDENTIALS_ID = 'test-k8s-kubeconfig'
-  }
+    stage('Checkout') {
+      checkout scm
+      sh 'git rev-parse --abbrev-ref HEAD && git rev-parse --short=12 HEAD'
+    }
 
-  stages {
     stage('Validate PaiWork Seed') {
-      steps {
+      sh '''
+        set -eu
+        test -f deploy/paiwork/seed/.craft-agent/config.json
+        test -d deploy/paiwork/seed/.craft-agent/workspaces/paiwork
+        jq -e '.workspaces | length == 1 and .[0].slug == "paiwork"' deploy/paiwork/seed/.craft-agent/config.json
+        ! find deploy/paiwork/seed/.craft-agent -type f \\( -name '.paiobs.env' -o -name 'credentials.enc' -o -name '.server.lock' \\) | grep .
+      '''
+    }
+
+    stage('Prepare Image') {
+      env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short=12 HEAD').trim()
+      def tag = params.IMAGE_TAG?.trim() ? params.IMAGE_TAG.trim() : "${env.BUILD_NUMBER}-${env.GIT_SHA}"
+      env.IMAGE = "${params.IMAGE_REGISTRY}:${tag}"
+      echo "Image: ${env.IMAGE}"
+    }
+
+    stage('Build') {
+      sh 'IMAGE="$IMAGE" bash deploy/paiwork/scripts/build-image.sh'
+    }
+
+    stage('Push') {
+      withCredentials([usernamePassword(credentialsId: env.HARBOR_CREDENTIALS_ID, usernameVariable: 'HARBOR_USER', passwordVariable: 'HARBOR_PASSWORD')]) {
         sh '''
-          set -euo pipefail
-          test -f deploy/paiwork/seed/.craft-agent/config.json
-          test -d deploy/paiwork/seed/.craft-agent/workspaces/paiwork
-          jq -e '.workspaces | length == 1 and .[0].slug == "paiwork"' deploy/paiwork/seed/.craft-agent/config.json
-          ! find deploy/paiwork/seed/.craft-agent -type f \\( -name '.paiobs.env' -o -name 'credentials.enc' -o -name '.server.lock' \\) | grep .
+          set -eu
+          echo "$HARBOR_PASSWORD" | docker login ops-harbor.rabyte.cn -u "$HARBOR_USER" --password-stdin
+          docker push "$IMAGE"
         '''
       }
     }
 
-    stage('Build Image') {
-      steps {
-        script {
-          def tag = params.IMAGE_TAG?.trim() ? params.IMAGE_TAG.trim() : env.BUILD_NUMBER
-          env.IMAGE = "${params.IMAGE_REGISTRY}:${tag}"
-        }
-        sh 'IMAGE="$IMAGE" bash deploy/paiwork/scripts/build-image.sh'
-      }
-    }
-
-    stage('Push Image') {
-      steps {
-        withCredentials([usernamePassword(credentialsId: env.HARBOR_CREDENTIALS_ID, usernameVariable: 'HARBOR_USER', passwordVariable: 'HARBOR_PASSWORD')]) {
-          sh '''
-            set -euo pipefail
-            echo "$HARBOR_PASSWORD" | docker login ops-harbor.rabyte.cn -u "$HARBOR_USER" --password-stdin
-            docker push "$IMAGE"
-          '''
-        }
-      }
-    }
-
     stage('Deploy') {
-      steps {
-        withCredentials([file(credentialsId: env.KUBECONFIG_CREDENTIALS_ID, variable: 'KUBECONFIG_FILE')]) {
-          sh '''
-            set -euo pipefail
-            export KUBECONFIG="$KUBECONFIG_FILE"
-            export NAMESPACE="$K8S_NAMESPACE"
-            export K8S_CONTEXT="$K8S_CONTEXT"
-            export IMAGE="$IMAGE"
-            export IMAGE_PULL_POLICY=IfNotPresent
+      withCredentials([file(credentialsId: env.KUBECONFIG_CREDENTIALS_ID, variable: 'KUBECONFIG_FILE')]) {
+        sh '''
+          set -eu
+          export KUBECONFIG="$KUBECONFIG_FILE"
+          export NAMESPACE="$K8S_NAMESPACE"
+          export K8S_CONTEXT="$K8S_CONTEXT"
+          export IMAGE="$IMAGE"
+          export IMAGE_PULL_POLICY=IfNotPresent
 
-            kubectl config get-contexts
-            kubectl config use-context "$K8S_CONTEXT"
-            test "$(kubectl config current-context)" = "$K8S_CONTEXT"
-            kubectl get namespace "$K8S_NAMESPACE"
+          kubectl config get-contexts
+          kubectl config use-context "$K8S_CONTEXT"
+          test "$(kubectl config current-context)" = "$K8S_CONTEXT"
+          kubectl get namespace "$K8S_NAMESPACE"
 
-            if [ -z "${CRAFT_WEBUI_PASSWORD:-}" ]; then
-              echo "CRAFT_WEBUI_PASSWORD is required. Fill it in Build with Parameters." >&2
-              exit 1
-            fi
+          if [ -z "${CRAFT_WEBUI_PASSWORD:-}" ]; then
+            echo "CRAFT_WEBUI_PASSWORD is required. Fill it in Build with Parameters." >&2
+            exit 1
+          fi
 
-            SERVER_TOKEN="${CRAFT_SERVER_TOKEN:-}"
-            if [ -z "$SERVER_TOKEN" ]; then
-              SERVER_TOKEN="$(openssl rand -hex 32)"
-            fi
+          SERVER_TOKEN="${CRAFT_SERVER_TOKEN:-}"
+          if [ -z "$SERVER_TOKEN" ]; then
+            SERVER_TOKEN="$(openssl rand -hex 32)"
+          fi
 
-            secret_args=(
-              --from-literal=CRAFT_SERVER_TOKEN="$SERVER_TOKEN"
-              --from-literal=CRAFT_WEBUI_PASSWORD="$CRAFT_WEBUI_PASSWORD"
-            )
+          secret_file="$(mktemp)"
+          trap 'rm -f "$secret_file"' EXIT
+          chmod 600 "$secret_file"
+          {
+            printf 'CRAFT_SERVER_TOKEN=%s\n' "$SERVER_TOKEN"
+            printf 'CRAFT_WEBUI_PASSWORD=%s\n' "$CRAFT_WEBUI_PASSWORD"
+          } > "$secret_file"
 
-            if [ -n "${RABYTE_LLM_API_KEY:-}" ]; then
-              secret_args+=(--from-literal=RABYTE_LLM_API_KEY="$RABYTE_LLM_API_KEY")
-            fi
-            if [ -n "${SEALOS_LLM_API_KEY:-}" ]; then
-              secret_args+=(--from-literal=SEALOS_LLM_API_KEY="$SEALOS_LLM_API_KEY")
-            fi
-            if [ -n "${PAI_OBS_API_KEY:-}" ]; then
-              secret_args+=(--from-literal=PAI_OBS_API_KEY="$PAI_OBS_API_KEY")
-              secret_args+=(--from-literal=PAI_OBS_BASE_URL="${PAI_OBS_BASE_URL:-http://192.168.15.57:30100}")
-            fi
+          if [ -n "${RABYTE_LLM_API_KEY:-}" ]; then
+            printf 'RABYTE_LLM_API_KEY=%s\n' "$RABYTE_LLM_API_KEY" >> "$secret_file"
+          fi
+          if [ -n "${SEALOS_LLM_API_KEY:-}" ]; then
+            printf 'SEALOS_LLM_API_KEY=%s\n' "$SEALOS_LLM_API_KEY" >> "$secret_file"
+          fi
+          if [ -n "${PAI_OBS_API_KEY:-}" ]; then
+            printf 'PAI_OBS_API_KEY=%s\n' "$PAI_OBS_API_KEY" >> "$secret_file"
+            printf 'PAI_OBS_BASE_URL=%s\n' "${PAI_OBS_BASE_URL:-http://192.168.15.57:30100}" >> "$secret_file"
+          fi
 
-            kubectl -n "$K8S_NAMESPACE" create secret generic craft-agents-paiwork-secret \
-              "${secret_args[@]}" \
-              --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n "$K8S_NAMESPACE" create secret generic craft-agents-paiwork-secret \
+            --from-env-file="$secret_file" \
+            --dry-run=client -o yaml | kubectl apply -f -
 
-            bash deploy/paiwork/scripts/render-k8s.sh
-            kubectl apply -f deploy/paiwork/k8s/rendered.yaml
-            kubectl -n "$K8S_NAMESPACE" set image "deployment/$K8S_DEPLOYMENT" webui="$IMAGE"
-            kubectl -n "$K8S_NAMESPACE" rollout status "deployment/$K8S_DEPLOYMENT" --timeout=300s
-            kubectl -n "$K8S_NAMESPACE" get pods,svc -l app=craft-agents-paiwork
-          '''
-        }
+          bash deploy/paiwork/scripts/render-k8s.sh
+          kubectl apply -f deploy/paiwork/k8s/rendered.yaml
+          kubectl -n "$K8S_NAMESPACE" set image "deployment/$K8S_DEPLOYMENT" webui="$IMAGE"
+          kubectl -n "$K8S_NAMESPACE" rollout status "deployment/$K8S_DEPLOYMENT" --timeout=300s
+          kubectl -n "$K8S_NAMESPACE" get pods,svc -l app=craft-agents-paiwork
+        '''
       }
-    }
-  }
-
-  post {
-    success {
-      echo "Built and pushed ${env.IMAGE}"
     }
   }
 }
