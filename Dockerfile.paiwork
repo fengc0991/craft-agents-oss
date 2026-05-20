@@ -1,0 +1,72 @@
+# Craft Agents PaiWork WebUI/server image.
+#
+# Build from the repository root:
+#   docker build -f Dockerfile.paiwork -t craft-agents-paiwork:local .
+
+FROM oven/bun:1.3-slim
+
+LABEL org.opencontainers.image.description="Craft Agents Server + WebUI for PaiWork"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+
+ARG NODE_MAJOR=20
+ARG UID=10001
+ARG GID=10001
+
+RUN unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy NO_PROXY no_proxy && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates git ripgrep curl gnupg && \
+    curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN groupadd -g ${GID} craftagents && \
+    useradd -u ${UID} -g ${GID} -m -d /home/craftagents -s /bin/bash craftagents
+
+WORKDIR /app
+
+COPY package.json bun.lock bunfig.toml ./
+COPY packages/server/package.json packages/server/
+COPY packages/server-core/package.json packages/server-core/
+COPY packages/shared/package.json packages/shared/
+COPY packages/core/package.json packages/core/
+COPY packages/session-tools-core/package.json packages/session-tools-core/
+COPY packages/session-mcp-server/package.json packages/session-mcp-server/
+COPY packages/pi-agent-server/package.json packages/pi-agent-server/
+COPY packages/ui/package.json packages/ui/
+COPY packages/messaging-gateway/package.json packages/messaging-gateway/
+COPY packages/messaging-whatsapp-worker/package.json packages/messaging-whatsapp-worker/
+COPY apps/electron/package.json apps/electron/
+COPY apps/cli/package.json apps/cli/
+COPY apps/viewer/package.json apps/viewer/
+COPY apps/webui/package.json apps/webui/
+
+RUN bun install --frozen-lockfile
+
+COPY . .
+COPY deploy/paiwork/seed/.craft-agent /seed/.craft-agent
+
+RUN bun build packages/session-mcp-server/src/index.ts \
+      --outfile packages/session-mcp-server/dist/index.js --target node --format cjs && \
+    bun build packages/pi-agent-server/src/index.ts \
+      --outfile packages/pi-agent-server/dist/index.js --target node --format cjs && \
+    bun run scripts/build-wa-worker.ts && \
+    NODE_OPTIONS="--max-old-space-size=4096" bunx vite build --config apps/webui/vite.config.ts
+
+RUN mkdir -p /home/craftagents/.craft-agent && \
+    find /app -not -perm -o=r -exec chmod o+r {} + && \
+    find /app -type d -not -perm -o=x -exec chmod o+x {} + && \
+    chmod -R 777 /home/craftagents /seed/.craft-agent
+
+USER craftagents
+
+ENV HOME=/home/craftagents
+ENV CRAFT_RPC_HOST=0.0.0.0
+ENV CRAFT_RPC_PORT=9100
+ENV CRAFT_WEBUI_DIR=/app/apps/webui/dist
+ENV CRAFT_BUNDLED_ASSETS_ROOT=/app/apps/electron
+ENV CRAFT_MESSAGING_WA_WORKER=/app/packages/messaging-whatsapp-worker/dist/worker.cjs
+ENV CRAFT_MESSAGING_NODE_BIN=node
+
+EXPOSE 9100
+
+ENTRYPOINT ["bun", "run", "packages/server/src/index.ts"]
