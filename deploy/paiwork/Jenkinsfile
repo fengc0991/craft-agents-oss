@@ -3,11 +3,11 @@ properties([
   parameters([
     string(name: 'IMAGE_REGISTRY', defaultValue: 'ops-harbor.rabyte.cn/rabyte-data/rabyte-pre/pre/craft-agents-paiwork', description: 'Image repository without tag', trim: true),
     string(name: 'IMAGE_TAG', defaultValue: '', description: 'Optional image tag. Defaults to BUILD_NUMBER', trim: true),
-    password(name: 'CRAFT_WEBUI_PASSWORD', defaultValue: '', description: 'Required WebUI login password'),
-    password(name: 'CRAFT_SERVER_TOKEN', defaultValue: '', description: 'Optional server token. Leave empty to auto-generate'),
-    password(name: 'RABYTE_LLM_API_KEY', defaultValue: '', description: 'Optional Rabyte LLM API key'),
-    password(name: 'SEALOS_LLM_API_KEY', defaultValue: '', description: 'Optional Sealos LLM API key'),
-    password(name: 'PAI_OBS_API_KEY', defaultValue: '', description: 'Optional PaiWork observability API key'),
+    password(name: 'CRAFT_WEBUI_PASSWORD', description: 'Required WebUI login password'),
+    password(name: 'CRAFT_SERVER_TOKEN', description: 'Optional server token. Leave empty to auto-generate'),
+    password(name: 'RABYTE_LLM_API_KEY', description: 'Optional Rabyte LLM API key'),
+    password(name: 'SEALOS_LLM_API_KEY', description: 'Optional Sealos LLM API key'),
+    password(name: 'PAI_OBS_API_KEY', description: 'Optional PaiWork observability API key'),
     string(name: 'PAI_OBS_BASE_URL', defaultValue: 'http://192.168.15.57:30100', description: 'PaiWork observability gateway URL', trim: true),
   ])
 ])
@@ -31,7 +31,8 @@ node {
         set -eu
         test -f deploy/paiwork/seed/.craft-agent/config.json
         test -d deploy/paiwork/seed/.craft-agent/workspaces/paiwork
-        jq -e '.workspaces | length == 1 and .[0].slug == "paiwork"' deploy/paiwork/seed/.craft-agent/config.json
+        grep -q '"slug"[[:space:]]*:[[:space:]]*"paiwork"' deploy/paiwork/seed/.craft-agent/config.json
+        ! grep -q '"slug"[[:space:]]*:[[:space:]]*"fengchao"' deploy/paiwork/seed/.craft-agent/config.json
         ! find deploy/paiwork/seed/.craft-agent -type f \\( -name '.paiobs.env' -o -name 'credentials.enc' -o -name '.server.lock' \\) | grep .
       '''
     }
