@@ -3,7 +3,9 @@
 # Build from the repository root:
 #   docker build -f Dockerfile.paiwork -t craft-agents-paiwork:local .
 
-FROM oven/bun:1.3-slim
+# Pin the linux/amd64 image manifest. The Jenkins Docker/BuildKit version used
+# in ops occasionally fails to resolve the multi-arch `oven/bun:1.3-slim` tag.
+FROM oven/bun@sha256:621f249399228db47cf34611ee662585e77e015250ed29d5d0932b2d3282f0b0
 
 LABEL org.opencontainers.image.description="Craft Agents Server + WebUI for PaiWork"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
