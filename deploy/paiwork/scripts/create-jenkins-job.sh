@@ -29,6 +29,53 @@ cat > "$tmp_xml" <<XML
   <description>Craft Agents PaiWork WebUI deployment. Managed by deploy/paiwork/scripts/create-jenkins-job.sh.</description>
   <keepDependencies>false</keepDependencies>
   <properties>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.StringParameterDefinition>
+          <name>IMAGE_REGISTRY</name>
+          <description>Image repository without tag</description>
+          <defaultValue>ops-harbor.rabyte.cn/rabyte-data/rabyte-pre/pre/craft-agents-paiwork</defaultValue>
+          <trim>true</trim>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>IMAGE_TAG</name>
+          <description>Optional image tag. Defaults to BUILD_NUMBER</description>
+          <defaultValue></defaultValue>
+          <trim>true</trim>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.PasswordParameterDefinition>
+          <name>CRAFT_WEBUI_PASSWORD</name>
+          <description>Required WebUI login password</description>
+          <defaultValue></defaultValue>
+        </hudson.model.PasswordParameterDefinition>
+        <hudson.model.PasswordParameterDefinition>
+          <name>CRAFT_SERVER_TOKEN</name>
+          <description>Optional server token. Leave empty to auto-generate</description>
+          <defaultValue></defaultValue>
+        </hudson.model.PasswordParameterDefinition>
+        <hudson.model.PasswordParameterDefinition>
+          <name>RABYTE_LLM_API_KEY</name>
+          <description>Optional Rabyte LLM API key</description>
+          <defaultValue></defaultValue>
+        </hudson.model.PasswordParameterDefinition>
+        <hudson.model.PasswordParameterDefinition>
+          <name>SEALOS_LLM_API_KEY</name>
+          <description>Optional Sealos LLM API key</description>
+          <defaultValue></defaultValue>
+        </hudson.model.PasswordParameterDefinition>
+        <hudson.model.PasswordParameterDefinition>
+          <name>PAI_OBS_API_KEY</name>
+          <description>Optional PaiWork observability API key</description>
+          <defaultValue></defaultValue>
+        </hudson.model.PasswordParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>PAI_OBS_BASE_URL</name>
+          <description>PaiWork observability gateway URL</description>
+          <defaultValue>http://192.168.15.57:30100</defaultValue>
+          <trim>true</trim>
+        </hudson.model.StringParameterDefinition>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
     <org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty>
       <abortPrevious>false</abortPrevious>
     </org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty>

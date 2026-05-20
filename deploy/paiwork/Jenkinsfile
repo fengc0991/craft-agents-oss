@@ -4,6 +4,12 @@ pipeline {
   parameters {
     string(name: 'IMAGE_REGISTRY', defaultValue: 'ops-harbor.rabyte.cn/rabyte-data/rabyte-pre/pre/craft-agents-paiwork', description: 'Image repository without tag')
     string(name: 'IMAGE_TAG', defaultValue: '', description: 'Optional image tag. Defaults to BUILD_NUMBER')
+    password(name: 'CRAFT_WEBUI_PASSWORD', defaultValue: '', description: 'Required WebUI login password')
+    password(name: 'CRAFT_SERVER_TOKEN', defaultValue: '', description: 'Optional server token. Leave empty to auto-generate')
+    password(name: 'RABYTE_LLM_API_KEY', defaultValue: '', description: 'Optional Rabyte LLM API key')
+    password(name: 'SEALOS_LLM_API_KEY', defaultValue: '', description: 'Optional Sealos LLM API key')
+    password(name: 'PAI_OBS_API_KEY', defaultValue: '', description: 'Optional PaiWork observability API key')
+    string(name: 'PAI_OBS_BASE_URL', defaultValue: 'http://192.168.15.57:30100', description: 'PaiWork observability gateway URL')
   }
 
   environment {
@@ -65,7 +71,36 @@ pipeline {
             kubectl config use-context "$K8S_CONTEXT"
             test "$(kubectl config current-context)" = "$K8S_CONTEXT"
             kubectl get namespace "$K8S_NAMESPACE"
-            kubectl -n "$K8S_NAMESPACE" get secret craft-agents-paiwork-secret
+
+            if [ -z "${CRAFT_WEBUI_PASSWORD:-}" ]; then
+              echo "CRAFT_WEBUI_PASSWORD is required. Fill it in Build with Parameters." >&2
+              exit 1
+            fi
+
+            SERVER_TOKEN="${CRAFT_SERVER_TOKEN:-}"
+            if [ -z "$SERVER_TOKEN" ]; then
+              SERVER_TOKEN="$(openssl rand -hex 32)"
+            fi
+
+            secret_args=(
+              --from-literal=CRAFT_SERVER_TOKEN="$SERVER_TOKEN"
+              --from-literal=CRAFT_WEBUI_PASSWORD="$CRAFT_WEBUI_PASSWORD"
+            )
+
+            if [ -n "${RABYTE_LLM_API_KEY:-}" ]; then
+              secret_args+=(--from-literal=RABYTE_LLM_API_KEY="$RABYTE_LLM_API_KEY")
+            fi
+            if [ -n "${SEALOS_LLM_API_KEY:-}" ]; then
+              secret_args+=(--from-literal=SEALOS_LLM_API_KEY="$SEALOS_LLM_API_KEY")
+            fi
+            if [ -n "${PAI_OBS_API_KEY:-}" ]; then
+              secret_args+=(--from-literal=PAI_OBS_API_KEY="$PAI_OBS_API_KEY")
+              secret_args+=(--from-literal=PAI_OBS_BASE_URL="${PAI_OBS_BASE_URL:-http://192.168.15.57:30100}")
+            fi
+
+            kubectl -n "$K8S_NAMESPACE" create secret generic craft-agents-paiwork-secret \
+              "${secret_args[@]}" \
+              --dry-run=client -o yaml | kubectl apply -f -
 
             bash deploy/paiwork/scripts/render-k8s.sh
             kubectl apply -f deploy/paiwork/k8s/rendered.yaml

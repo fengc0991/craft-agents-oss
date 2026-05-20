@@ -30,6 +30,17 @@ Default Kubernetes context is `test-saas-acs-new`; the scripts explicitly switch
 to it before applying manifests. Default namespace is `rabyte-data-pre-data`,
 matching the existing Pai Automation deployment.
 
+The Jenkins pipeline also creates or updates Kubernetes Secret
+`craft-agents-paiwork-secret` automatically during the Deploy stage. In
+**Build with Parameters**, fill at least:
+
+```text
+CRAFT_WEBUI_PASSWORD
+```
+
+Leave `CRAFT_SERVER_TOKEN` empty to let Jenkins generate a strong token.
+`RABYTE_LLM_API_KEY`, `SEALOS_LLM_API_KEY`, and `PAI_OBS_API_KEY` are optional.
+
 The rendered manifest is written to:
 
 ```text
