@@ -50,7 +50,7 @@ After pushing this branch to a Git remote Jenkins can read:
 export JENKINS_USER=<user>
 export JENKINS_PASSWORD=<password-or-api-token>
 export JOB_NAME=test-craft-agents-paiwork
-export GIT_URL=https://github.com/fengc0991/craft-agents-oss.git
+export GIT_URL=https://gitlab2.rabyte.cn/gl/fengc01/craft-agents-paiwork.git
 export GIT_BRANCH='*/main'
 
 bash deploy/paiwork/scripts/create-jenkins-job.sh

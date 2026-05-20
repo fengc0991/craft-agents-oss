@@ -3,10 +3,10 @@ set -euo pipefail
 
 JENKINS_URL="${JENKINS_URL:-https://ops-jenkins.rabyte.cn}"
 JOB_NAME="${JOB_NAME:-test-craft-agents-paiwork}"
-GIT_URL="${GIT_URL:-https://github.com/fengc0991/craft-agents-oss.git}"
+GIT_URL="${GIT_URL:-https://gitlab2.rabyte.cn/gl/fengc01/craft-agents-paiwork.git}"
 GIT_BRANCH="${GIT_BRANCH:-*/main}"
 SCRIPT_PATH="${SCRIPT_PATH:-deploy/paiwork/Jenkinsfile}"
-GIT_CREDENTIALS_ID="${GIT_CREDENTIALS_ID:-}"
+GIT_CREDENTIALS_ID="${GIT_CREDENTIALS_ID:-jenkins_tag}"
 
 : "${JENKINS_USER:?Set JENKINS_USER}"
 : "${JENKINS_PASSWORD:?Set JENKINS_PASSWORD or an API token}"
