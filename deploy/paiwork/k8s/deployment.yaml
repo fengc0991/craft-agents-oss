@@ -48,12 +48,13 @@ spec:
             - -ec
             - |
               mkdir -p /home/craftagents/.craft-agent
-              if [ ! -f /home/craftagents/.craft-agent/config.json ]; then
-                cp -a /seed/.craft-agent/. /home/craftagents/.craft-agent/
-              fi
-              rm -f /home/craftagents/.craft-agent/.server.lock
-              chown -R 10001:10001 /home/craftagents/.craft-agent
-              chmod -R u+rwX,g+rwX /home/craftagents/.craft-agent
+            if [ ! -f /home/craftagents/.craft-agent/config.json ]; then
+              cp -a /seed/.craft-agent/. /home/craftagents/.craft-agent/
+            fi
+            rm -f /home/craftagents/.craft-agent/.server.lock
+            find /home/craftagents/.craft-agent -xtype l -delete || true
+            chown -R 10001:10001 /home/craftagents/.craft-agent
+            chmod -R u+rwX,g+rwX /home/craftagents/.craft-agent
           volumeMounts:
             - name: craft-agent-data
               mountPath: /home/craftagents/.craft-agent
