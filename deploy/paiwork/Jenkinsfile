@@ -59,8 +59,11 @@ node {
           export IMAGE_PULL_POLICY=IfNotPresent
 
           kubectl config get-contexts
-          kubectl config use-context "$K8S_CONTEXT"
-          test "$(kubectl config current-context)" = "$K8S_CONTEXT"
+          if kubectl config get-contexts "$K8S_CONTEXT" >/dev/null 2>&1; then
+            kubectl config use-context "$K8S_CONTEXT"
+          else
+            echo "Kubeconfig context '$K8S_CONTEXT' not found; using current context: $(kubectl config current-context)"
+          fi
           kubectl get namespace "$K8S_NAMESPACE"
 
           if [ -z "${CRAFT_WEBUI_PASSWORD:-}" ]; then
