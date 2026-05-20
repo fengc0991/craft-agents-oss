@@ -3,22 +3,17 @@
 # Build from the repository root:
 #   docker build -f Dockerfile.paiwork -t craft-agents-paiwork:local .
 
-# Use the internal Harbor mirror to avoid Docker Hub mirror failures on Jenkins.
-FROM ops-harbor.rabyte.cn/rabyte-data/oven/bun:1
+# Use internal Harbor images so Jenkins does not depend on Docker Hub or Debian mirrors.
+FROM ops-harbor.rabyte.cn/rabyte-data/oven/bun:1 AS bun-base
+FROM ops-harbor.rabyte.cn/rabyte-common/node:22.13.0
 
 LABEL org.opencontainers.image.description="Craft Agents Server + WebUI for PaiWork"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 
-ARG NODE_MAJOR=20
 ARG UID=10001
 ARG GID=10001
 
-RUN unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy NO_PROXY no_proxy && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates git ripgrep curl gnupg && \
-    curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - && \
-    apt-get install -y --no-install-recommends nodejs && \
-    rm -rf /var/lib/apt/lists/*
+COPY --from=bun-base /usr/local/bin/bun /usr/local/bin/bun
 
 RUN groupadd -g ${GID} craftagents && \
     useradd -u ${UID} -g ${GID} -m -d /home/craftagents -s /bin/bash craftagents
