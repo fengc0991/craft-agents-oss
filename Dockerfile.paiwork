@@ -51,7 +51,7 @@ RUN bun build packages/session-mcp-server/src/index.ts \
     bun build packages/pi-agent-server/src/index.ts \
       --outfile packages/pi-agent-server/dist/index.js --target node --format cjs && \
     bun run scripts/build-wa-worker.ts && \
-    NODE_OPTIONS="--max-old-space-size=4096" bunx vite build --config apps/webui/vite.config.ts
+    NODE_OPTIONS="--max-old-space-size=4096" bun x vite build --config apps/webui/vite.config.ts
 
 RUN mkdir -p /home/craftagents/.craft-agent && \
     find /app -not -perm -o=r -exec chmod o+r {} + && \
