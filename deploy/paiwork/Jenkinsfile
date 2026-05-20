@@ -18,7 +18,6 @@ node {
     env.K8S_CONTEXT = 'test-saas-acs-new'
     env.K8S_NAMESPACE = 'rabyte-data-pre-data'
     env.K8S_DEPLOYMENT = 'craft-agents-paiwork'
-    env.HARBOR_CREDENTIALS_ID = 'harbor-ops'
     env.KUBECONFIG_CREDENTIALS_ID = 'test-k8s-kubeconfig'
 
     stage('Checkout') {
@@ -49,13 +48,7 @@ node {
     }
 
     stage('Push') {
-      withCredentials([usernamePassword(credentialsId: env.HARBOR_CREDENTIALS_ID, usernameVariable: 'HARBOR_USER', passwordVariable: 'HARBOR_PASSWORD')]) {
-        sh '''
-          set -eu
-          echo "$HARBOR_PASSWORD" | docker login ops-harbor.rabyte.cn -u "$HARBOR_USER" --password-stdin
-          docker push "$IMAGE"
-        '''
-      }
+      sh 'docker push "$IMAGE"'
     }
 
     stage('Deploy') {
