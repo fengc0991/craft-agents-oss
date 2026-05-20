@@ -282,6 +282,14 @@
       form.requestSubmit();
     }
 
+    function getReturnTarget() {
+      const params = new URLSearchParams(window.location.search);
+      const returnTo = params.get('returnTo') || '/';
+      if (!returnTo.startsWith('/') || returnTo.startsWith('//')) return '/';
+      if (returnTo.startsWith('/login')) return '/';
+      return returnTo;
+    }
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       errorEl.classList.remove('visible');
@@ -298,7 +306,7 @@
 
         if (res.ok) {
           // Cookie is set by the response — redirect to app
-          window.location.href = '/';
+          window.location.href = getReturnTarget();
           return;
         }
 

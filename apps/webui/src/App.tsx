@@ -20,6 +20,67 @@ const ElectronApp = lazy(() => import('@/App'))
 
 type Phase = 'loading' | 'error' | 'ready'
 
+interface WorkspaceConfig {
+  id: string
+  slug?: string
+  name?: string
+}
+
+interface WorkspacesConfig {
+  defaultWorkspaceId?: string | null
+  workspaces?: WorkspaceConfig[]
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  return normalized === 'localhost'
+    || normalized === '::1'
+    || normalized === '0:0:0:0:0:0:0:1'
+    || normalized === '0.0.0.0'
+    || /^127(?:\.\d{1,3}){3}$/.test(normalized)
+}
+
+function resolveBrowserWebSocketUrl(serverWsUrl: string): string {
+  const url = new URL(serverWsUrl)
+  const pageHost = window.location.hostname
+
+  if (isLoopbackHost(url.hostname) && !isLoopbackHost(pageHost)) {
+    url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    url.host = window.location.host
+  }
+
+  return url.toString()
+}
+
+function loginUrlForCurrentPage(): string {
+  const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`
+  const url = new URL('/login', window.location.origin)
+  if (returnTo && returnTo !== '/login') {
+    url.searchParams.set('returnTo', returnTo)
+  }
+  return `${url.pathname}${url.search}`
+}
+
+function resolveWorkspaceIdFromConfig(
+  requestedWorkspace: string | undefined,
+  config: WorkspacesConfig,
+): string | undefined {
+  if (!requestedWorkspace) return config.defaultWorkspaceId ?? undefined
+
+  if (!config.workspaces) {
+    return config.defaultWorkspaceId ?? requestedWorkspace
+  }
+
+  const normalized = requestedWorkspace.toLowerCase()
+  const match = config.workspaces?.find((workspace) =>
+    workspace.id === requestedWorkspace
+    || workspace.slug?.toLowerCase() === normalized
+    || workspace.name?.toLowerCase() === normalized
+  )
+
+  return match?.id ?? requestedWorkspace
+}
+
 function LoadingScreen() {
   const { t } = useTranslation()
 
@@ -76,7 +137,7 @@ export default function App() {
       if (!configRes.ok) {
         if (configRes.status === 401) {
           // Session expired — redirect to login
-          window.location.href = '/login'
+          window.location.href = loginUrlForCurrentPage()
           return
         }
         throw new Error(`Failed to fetch config: ${configRes.status}`)
@@ -84,23 +145,23 @@ export default function App() {
 
       const { wsUrl, wsToken } = await configRes.json() as { wsUrl: string; wsToken?: string }
       if (!wsUrl) throw new Error('Server did not return a WebSocket URL')
+      const browserWsUrl = resolveBrowserWebSocketUrl(wsUrl)
 
       // 2. Determine workspace — check URL params first
       const params = new URLSearchParams(window.location.search)
-      let workspaceId = params.get('workspace') ?? undefined
+      const requestedWorkspace = params.get('workspace') ?? params.get('ws') ?? undefined
+      let workspaceId: string | undefined
 
-      // If no workspace in URL, fetch the default from the server
-      // so we can include it in the WebSocket handshake
-      if (!workspaceId) {
-        try {
-          const wsRes = await fetch('/api/config/workspaces', { credentials: 'same-origin' })
-          if (wsRes.ok) {
-            const { defaultWorkspaceId } = await wsRes.json() as { defaultWorkspaceId?: string }
-            if (defaultWorkspaceId) workspaceId = defaultWorkspaceId
-          }
-        } catch {
-          // Non-fatal — workspace will be set via switchWorkspace later
+      // Resolve URL workspace slugs and the server default before the
+      // WebSocket handshake so push routing is correct from the start.
+      try {
+        const wsRes = await fetch('/api/config/workspaces', { credentials: 'same-origin' })
+        if (wsRes.ok) {
+          const wsConfig = await wsRes.json() as WorkspacesConfig
+          workspaceId = resolveWorkspaceIdFromConfig(requestedWorkspace, wsConfig)
         }
+      } catch {
+        // Non-fatal — workspace will be set via switchWorkspace later
       }
 
       // 3. Create web API adapter
@@ -109,7 +170,7 @@ export default function App() {
         clientRef.current.destroy()
       }
 
-      const { api, client } = createWebApi({ serverUrl: wsUrl, token: wsToken, workspaceId })
+      const { api, client } = createWebApi({ serverUrl: browserWsUrl, token: wsToken, workspaceId })
       clientRef.current = client
 
       // 4. Set window.electronAPI — must happen before any Electron component mounts

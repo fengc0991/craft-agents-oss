@@ -364,10 +364,12 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
       if (!configSession) {
         return Response.json({ error: 'Unauthorized' }, { status: 401 })
       }
-      const { getActiveWorkspace } = await import('@craft-agent/shared/config/storage')
+      const { getActiveWorkspace, getWorkspaces } = await import('@craft-agent/shared/config/storage')
       const active = getActiveWorkspace()
+      const workspaces = getWorkspaces().map(({ id, slug, name }) => ({ id, slug, name }))
       return Response.json({
         defaultWorkspaceId: active?.id ?? null,
+        workspaces,
       })
     }
 
