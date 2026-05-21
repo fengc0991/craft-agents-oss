@@ -25,6 +25,7 @@ function createTestWebuiDir(): string {
 }
 
 async function createServer(overrides?: {
+  authDisabled?: boolean
   secureCookies?: boolean
   publicWsUrl?: string
   wsProtocol?: 'ws' | 'wss'
@@ -35,6 +36,7 @@ async function createServer(overrides?: {
     webuiDir: createTestWebuiDir(),
     secret: SECRET,
     password: PASSWORD,
+    authDisabled: overrides?.authDisabled,
     secureCookies: overrides?.secureCookies,
     publicWsUrl: overrides?.publicWsUrl,
     wsProtocol: overrides?.wsProtocol ?? 'wss',
@@ -111,6 +113,31 @@ describe('startWebuiHttpServer', () => {
 
     expect(res.status).toBe(401)
     expect(await res.json()).toEqual({ error: 'Invalid credentials' })
+  })
+
+  it('can issue webui sessions without login when auth is disabled', async () => {
+    const { baseUrl } = await createServer({ authDisabled: true, wsProtocol: 'ws', wsPort: 9100 })
+
+    const appRes = await fetch(`${baseUrl}/`, {
+      headers: { accept: 'text/html' },
+    })
+
+    expect(appRes.status).toBe(200)
+    expect(await appRes.text()).toContain('app')
+    expect(appRes.headers.get('set-cookie')).toContain('craft_session=')
+
+    const configRes = await fetch(`${baseUrl}/api/config`)
+    const config = await configRes.json() as { wsToken?: string; wsUrl?: string }
+
+    expect(configRes.status).toBe(200)
+    expect(config.wsUrl).toBe('ws://127.0.0.1:9100')
+    expect(config.wsToken).toBeTruthy()
+    expect(configRes.headers.get('set-cookie')).toContain('craft_session=')
+
+    const loginRes = await fetch(`${baseUrl}/login`, { redirect: 'manual' })
+    expect(loginRes.status).toBe(302)
+    expect(loginRes.headers.get('location')).toBe('/')
+    expect(loginRes.headers.get('set-cookie')).toContain('craft_session=')
   })
 
   it('honors an explicit secure-cookie override', async () => {

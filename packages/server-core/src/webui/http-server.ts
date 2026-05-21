@@ -126,6 +126,8 @@ export interface WebuiHandlerOptions {
   secret: string
   /** Optional separate web UI password. Falls back to `secret` for verification. */
   password?: string
+  /** When true, the WebUI issues browser sessions without prompting for a password. */
+  authDisabled?: boolean
   /** Explicit Secure-cookie override. When unset, infer from the request / proxy headers. */
   secureCookies?: boolean
   /** Optional browser-facing WebSocket URL override for reverse-proxy deployments. */
@@ -172,6 +174,7 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
     webuiDir,
     secret,
     password,
+    authDisabled = false,
     secureCookies,
     publicWsUrl,
     wsProtocol,
@@ -189,6 +192,23 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
 
   // Hash the login password at startup (async, but resolves before first auth attempt in practice)
   const passwordReady = initPasswordHash(loginPassword)
+
+  async function resolveAutoAuthSession(req: Request, useSecureCookies: boolean): Promise<{
+    token: string
+    setCookie?: string
+  }> {
+    const cookieHeader = req.headers.get('cookie')
+    const existingToken = extractSessionCookie(cookieHeader)
+    if (existingToken && await validateSession(cookieHeader, secret)) {
+      return { token: existingToken }
+    }
+
+    const token = await createSessionToken(secret)
+    return {
+      token,
+      setCookie: buildSessionCookie(token, useSecureCookies),
+    }
+  }
 
   /** Extract client IP — only trusts proxy headers when trustedProxies is configured. */
   function getClientIp(req: Request): string {
@@ -215,6 +235,17 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
 
     // ── Login page (no auth) ──
     if (path === '/login' || path === '/login/') {
+      if (authDisabled) {
+        const autoSession = await resolveAutoAuthSession(req, useSecureCookies)
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location: '/',
+            ...(autoSession.setCookie ? { 'Set-Cookie': autoSession.setCookie } : {}),
+          },
+        })
+      }
+
       const loginFile = Bun.file(join(webuiDir, 'login.html'))
       if (await loginFile.exists()) {
         return new Response(loginFile, {
@@ -237,6 +268,16 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
 
     // ── Auth endpoint ──
     if (path === '/api/auth' && req.method === 'POST') {
+      if (authDisabled) {
+        const autoSession = await resolveAutoAuthSession(req, useSecureCookies)
+        return Response.json({ ok: true }, {
+          status: 200,
+          headers: autoSession.setCookie
+            ? { 'Set-Cookie': autoSession.setCookie }
+            : undefined,
+        })
+      }
+
       await passwordReady
       const ip = getClientIp(req)
 
@@ -348,6 +389,18 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
 
     // ── Config endpoint (requires session cookie) ──
     if (path === '/api/config' && req.method === 'GET') {
+      if (authDisabled) {
+        const autoSession = await resolveAutoAuthSession(req, useSecureCookies)
+        return Response.json({
+          wsUrl: resolveWebSocketUrl(req, { publicWsUrl, wsProtocol, wsPort }),
+          wsToken: autoSession.token,
+        }, {
+          headers: autoSession.setCookie
+            ? { 'Set-Cookie': autoSession.setCookie }
+            : undefined,
+        })
+      }
+
       const configSession = await validateSession(req.headers.get('cookie'), secret)
       if (!configSession) {
         return Response.json({ error: 'Unauthorized' }, { status: 401 })
@@ -360,6 +413,21 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
 
     // Return the default workspace ID so the webui can include it in the WS handshake
     if (path === '/api/config/workspaces' && req.method === 'GET') {
+      if (authDisabled) {
+        const autoSession = await resolveAutoAuthSession(req, useSecureCookies)
+        const { getActiveWorkspace, getWorkspaces } = await import('@craft-agent/shared/config/storage')
+        const active = getActiveWorkspace()
+        const workspaces = getWorkspaces().map(({ id, slug, name }) => ({ id, slug, name }))
+        return Response.json({
+          defaultWorkspaceId: active?.id ?? null,
+          workspaces,
+        }, {
+          headers: autoSession.setCookie
+            ? { 'Set-Cookie': autoSession.setCookie }
+            : undefined,
+        })
+      }
+
       const configSession = await validateSession(req.headers.get('cookie'), secret)
       if (!configSession) {
         return Response.json({ error: 'Unauthorized' }, { status: 401 })
@@ -374,8 +442,11 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
     }
 
     // ── Everything below requires a valid session cookie ──
+    const autoSession = authDisabled
+      ? await resolveAutoAuthSession(req, useSecureCookies)
+      : null
     const cookieHeader = req.headers.get('cookie')
-    const session = await validateSession(cookieHeader, secret)
+    const session = authDisabled ? true : await validateSession(cookieHeader, secret)
 
     if (!session) {
       const accept = req.headers.get('accept') ?? ''
@@ -390,7 +461,10 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
       const file = Bun.file(join(webuiDir, path))
       if (await file.exists()) {
         return new Response(file, {
-          headers: { 'Content-Type': getMimeType(path) },
+          headers: {
+            'Content-Type': getMimeType(path),
+            ...(autoSession?.setCookie ? { 'Set-Cookie': autoSession.setCookie } : {}),
+          },
         })
       }
     }
@@ -399,7 +473,10 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
     const indexFile = Bun.file(join(webuiDir, 'index.html'))
     if (await indexFile.exists()) {
       return new Response(indexFile, {
-        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          ...(autoSession?.setCookie ? { 'Set-Cookie': autoSession.setCookie } : {}),
+        },
       })
     }
 

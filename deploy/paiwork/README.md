@@ -2,6 +2,8 @@
 
 This deploys Craft Agents WebUI/server with only the `paiwork` workspace exposed.
 The Kubernetes Service uses NodePort `30102`.
+The PaiWork manifest sets `CRAFT_WEBUI_DISABLE_AUTH=true`, so opening the
+NodePort goes directly to the workspace UI without a WebUI login prompt.
 
 ## Local Build
 

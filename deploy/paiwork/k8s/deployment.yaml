@@ -108,6 +108,8 @@ spec:
               value: /app/apps/electron
             - name: CRAFT_WEBUI_SECURE_COOKIE
               value: "false"
+            - name: CRAFT_WEBUI_DISABLE_AUTH
+              value: "true"
             - name: CRAFT_SERVER_TOKEN
               valueFrom:
                 secretKeyRef:

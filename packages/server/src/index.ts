@@ -19,6 +19,7 @@
  *   CRAFT_DEBUG                — 'true' for debug logging
  *   CRAFT_WEBUI_DIR            — path to built web UI assets (enables web UI on RPC port)
  *   CRAFT_WEBUI_PASSWORD       — optional shorter password for web login (falls back to CRAFT_SERVER_TOKEN)
+ *   CRAFT_WEBUI_DISABLE_AUTH   — optional true/false; true lets browsers open the WebUI without login
  *   CRAFT_WEBUI_SECURE_COOKIE  — optional true/false override for the session cookie Secure flag
  *   CRAFT_WEBUI_WS_URL         — optional browser-facing ws:// or wss:// URL returned by /api/config
  *   CRAFT_MESSAGING_WA_WORKER  — absolute path to worker.cjs (default: packages/messaging-whatsapp-worker/dist/worker.cjs)
@@ -114,6 +115,7 @@ if (tlsCertPath || tlsKeyPath) {
 // Web UI configuration
 const webuiDir = process.env.CRAFT_WEBUI_DIR || undefined
 const webuiEnabled = webuiDir && existsSync(webuiDir)
+const webuiDisableAuth = parseOptionalBooleanEnv('CRAFT_WEBUI_DISABLE_AUTH', process.env.CRAFT_WEBUI_DISABLE_AUTH) ?? false
 const webuiSecureCookies = parseOptionalBooleanEnv('CRAFT_WEBUI_SECURE_COOKIE', process.env.CRAFT_WEBUI_SECURE_COOKIE)
 const webuiWsUrl = parseOptionalWebSocketUrl('CRAFT_WEBUI_WS_URL', process.env.CRAFT_WEBUI_WS_URL)
 const serverToken = process.env.CRAFT_SERVER_TOKEN
@@ -139,6 +141,7 @@ if (webuiEnabled && serverToken) {
     webuiDir: webuiDir!,
     secret: serverToken,
     password: process.env.CRAFT_WEBUI_PASSWORD || undefined,
+    authDisabled: webuiDisableAuth,
     secureCookies: webuiSecureCookies,
     publicWsUrl: webuiWsUrl,
     wsProtocol: rpcProtocol,
