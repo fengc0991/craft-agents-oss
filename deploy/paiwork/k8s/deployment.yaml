@@ -110,6 +110,8 @@ spec:
               value: "false"
             - name: CRAFT_WEBUI_DISABLE_AUTH
               value: "true"
+            - name: CRAFT_WEBUI_WS_URL
+              value: "ws://192.168.15.57:30102"
             - name: CRAFT_SERVER_TOKEN
               valueFrom:
                 secretKeyRef:
