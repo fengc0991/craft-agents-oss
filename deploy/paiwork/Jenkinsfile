@@ -66,6 +66,12 @@ node {
           fi
           kubectl get namespace "$K8S_NAMESPACE"
 
+          existing_secret_value() {
+            key="$1"
+            kubectl -n "$K8S_NAMESPACE" get secret craft-agents-paiwork-secret \
+              -o "jsonpath={.data.$key}" 2>/dev/null | base64 -d 2>/dev/null || true
+          }
+
           if [ -z "${CRAFT_WEBUI_PASSWORD:-}" ]; then
             echo "CRAFT_WEBUI_PASSWORD is required. Fill it in Build with Parameters." >&2
             exit 1
@@ -73,7 +79,33 @@ node {
 
           SERVER_TOKEN="${CRAFT_SERVER_TOKEN:-}"
           if [ -z "$SERVER_TOKEN" ]; then
+            SERVER_TOKEN="$(existing_secret_value CRAFT_SERVER_TOKEN)"
+          fi
+          if [ -z "$SERVER_TOKEN" ]; then
             SERVER_TOKEN="$(openssl rand -hex 32)"
+          fi
+
+          RABYTE_KEY="${RABYTE_LLM_API_KEY:-}"
+          if [ -z "$RABYTE_KEY" ]; then
+            RABYTE_KEY="$(existing_secret_value RABYTE_LLM_API_KEY)"
+          fi
+
+          SEALOS_KEY="${SEALOS_LLM_API_KEY:-}"
+          if [ -z "$SEALOS_KEY" ]; then
+            SEALOS_KEY="$(existing_secret_value SEALOS_LLM_API_KEY)"
+          fi
+
+          PAI_KEY="${PAI_OBS_API_KEY:-}"
+          if [ -z "$PAI_KEY" ]; then
+            PAI_KEY="$(existing_secret_value PAI_OBS_API_KEY)"
+          fi
+
+          PAI_BASE="${PAI_OBS_BASE_URL:-}"
+          if [ -z "$PAI_BASE" ]; then
+            PAI_BASE="$(existing_secret_value PAI_OBS_BASE_URL)"
+          fi
+          if [ -z "$PAI_BASE" ]; then
+            PAI_BASE="http://192.168.15.57:30100"
           fi
 
           secret_file="$(mktemp)"
@@ -84,15 +116,15 @@ node {
             printf 'CRAFT_WEBUI_PASSWORD=%s\n' "$CRAFT_WEBUI_PASSWORD"
           } > "$secret_file"
 
-          if [ -n "${RABYTE_LLM_API_KEY:-}" ]; then
-            printf 'RABYTE_LLM_API_KEY=%s\n' "$RABYTE_LLM_API_KEY" >> "$secret_file"
+          if [ -n "$RABYTE_KEY" ]; then
+            printf 'RABYTE_LLM_API_KEY=%s\n' "$RABYTE_KEY" >> "$secret_file"
           fi
-          if [ -n "${SEALOS_LLM_API_KEY:-}" ]; then
-            printf 'SEALOS_LLM_API_KEY=%s\n' "$SEALOS_LLM_API_KEY" >> "$secret_file"
+          if [ -n "$SEALOS_KEY" ]; then
+            printf 'SEALOS_LLM_API_KEY=%s\n' "$SEALOS_KEY" >> "$secret_file"
           fi
-          if [ -n "${PAI_OBS_API_KEY:-}" ]; then
-            printf 'PAI_OBS_API_KEY=%s\n' "$PAI_OBS_API_KEY" >> "$secret_file"
-            printf 'PAI_OBS_BASE_URL=%s\n' "${PAI_OBS_BASE_URL:-http://192.168.15.57:30100}" >> "$secret_file"
+          if [ -n "$PAI_KEY" ]; then
+            printf 'PAI_OBS_API_KEY=%s\n' "$PAI_KEY" >> "$secret_file"
+            printf 'PAI_OBS_BASE_URL=%s\n' "$PAI_BASE" >> "$secret_file"
           fi
 
           kubectl -n "$K8S_NAMESPACE" create secret generic craft-agents-paiwork-secret \
