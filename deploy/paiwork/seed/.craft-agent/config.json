@@ -12,43 +12,6 @@
   "activeSessionId": null,
   "llmConnections": [
     {
-      "slug": "pi-api-key",
-      "name": "Sealos LLM Gateway",
-      "providerType": "pi_compat",
-      "authType": "api_key_with_endpoint",
-      "models": [
-        "deepseek-v4-pro",
-        "deepseek-v4-flash",
-        "claude-opus-4-7",
-        "claude-sonnet-4-6",
-        "gpt-5.5",
-        "gpt-5.4",
-        "gemini-3.1-pro-preview",
-        "gemini-3-pro-preview",
-        "kimi-k2.6",
-        "kimi-k2.5",
-        "glm-5.1",
-        "Pro/zai-org/GLM-5.1",
-        "mimo-v2.5-pro",
-        "mimo-v2.5",
-        "grok-4.2-thinking",
-        "qwen3-max-2026-01-23",
-        "qwen3.5-397b-a17b",
-        "doubao-seed-2-0-pro-260215",
-        "MiniMax-M2.7",
-        "hy3-preview"
-      ],
-      "defaultModel": "deepseek-v4-pro",
-      "modelSelectionMode": "userDefined3Tier",
-      "piAuthProvider": "openai",
-      "createdAt": 1777975567844,
-      "baseUrl": "https://ielszlfs.sealoshzh.site/v1",
-      "customEndpoint": {
-        "api": "openai-completions"
-      },
-      "midStreamBehavior": "steer"
-    },
-    {
       "slug": "rabyte-llm",
       "name": "Rabyte LLM Gateway",
       "providerType": "pi_compat",

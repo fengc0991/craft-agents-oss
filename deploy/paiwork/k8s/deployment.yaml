@@ -69,6 +69,17 @@ spec:
             - sh
             - -ec
             - |
+              bun --eval "
+              import { readFileSync, writeFileSync } from 'node:fs';
+              const configPath = '/home/craftagents/.craft-agent/config.json';
+              const config = JSON.parse(readFileSync(configPath, 'utf8'));
+              const seed = JSON.parse(readFileSync('/seed/.craft-agent/config.json', 'utf8'));
+              const rabyte = seed.llmConnections?.find((connection) => connection.slug === 'rabyte-llm');
+              if (!rabyte) throw new Error('Seed config is missing rabyte-llm');
+              config.llmConnections = [rabyte];
+              config.defaultLlmConnection = 'rabyte-llm';
+              writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+              "
               if [ -n "$${RABYTE_LLM_API_KEY:-}" ]; then
                 bun --eval "import { getCredentialManager } from './packages/shared/src/credentials/index.ts'; await getCredentialManager().setLlmApiKey('rabyte-llm', process.env.RABYTE_LLM_API_KEY);"
               fi
